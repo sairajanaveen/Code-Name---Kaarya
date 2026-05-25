@@ -27,12 +27,12 @@ export default function PremiumKaaryaApp() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const timerRef = useRef(null);
-  const appContainerRef = useRef(null);
+  const formRef = useRef(null);
 
   // Form states tracking all multi-utility variables
   const [meetingData, setMeetingData] = useState({
     meeting_name: "",
-    meeting_date: new Date().toISOString().split('T')[0],
+    meeting_date: "",
     attendees: "",
     agenda: "",
     raw_notes: "",
@@ -43,6 +43,14 @@ export default function PremiumKaaryaApp() {
   const [waitlistData, setWaitlistData] = useState({
     name: "", company: "", email: "", role: ""
   });
+
+  // Automatically stamp today's date safely client-side on mount
+  useEffect(() => {
+    setMeetingData(prev => ({
+      ...prev,
+      meeting_date: new Date().toISOString().split('T')[0]
+    }));
+  }, []);
 
   // Handle transparent to dark blur navigation header adaptation
   useEffect(() => {
@@ -61,7 +69,6 @@ export default function PremiumKaaryaApp() {
       }, 1000);
     } else {
       clearInterval(timerRef.current);
-      setRecordingDuration(0);
     }
     return () => clearInterval(timerRef.current);
   }, [isRecording]);
@@ -118,14 +125,16 @@ export default function PremiumKaaryaApp() {
 
   const focusViewOnInteractiveWorkspace = (targetTab) => {
     setActiveTab(targetTab);
-    const element = document.getElementById("workspace-hub");
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    setTimeout(() => {
+      const element = document.getElementById("workspace-hub");
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 50);
   };
 
   return (
-    <div ref={appContainerRef} className="bg-[#060B13] text-slate-100 min-height-screen font-sans selection:bg-[#00C2A8] selection:text-[#0A1F3D]">
+    <div className="bg-[#060B13] text-slate-100 min-h-screen font-sans selection:bg-[#00C2A8] selection:text-[#0A1F3D]">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Syne:wght@700;800&display=swap');
         .font-headline { font-family: 'Syne', sans-serif; }
@@ -152,10 +161,10 @@ export default function PremiumKaaryaApp() {
 
       {/* PREMIUM HIGH-DOPAMINE HERO BANNER */}
       <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-[5%] pt-24 overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#0A2D30] via-[#060B13] to-[#060B13]">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#00C2A8]/5 rounded-full blur-[120px] pointer-events-none animate-pulse" />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#00C2A8]/5 rounded-full blur-[120px] pointer-events-none" />
         
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-8 animate-fade-in">
-          <span className="w-2 h-2 rounded-full bg-[#00C2A8] animate-ping" />
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-8">
+          <span className="w-2 h-2 rounded-full bg-[#00C2A8] animate-pulse" />
           <span className="text-xs font-bold uppercase tracking-widest text-[#00C2A8]">Operational Intelligence Platform</span>
         </div>
 
@@ -204,7 +213,7 @@ export default function PremiumKaaryaApp() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               { num: "01", icon: "🎙️", title: "Asynchronous Input Ingestion", desc: "Speak naturally, drop messy snapshots of whiteboards, or forward raw accents. Sarvam OCR and Speech layers process Indian context cleanly." },
-              { num: "02", icon: "💎", title: "Human-In-The-Loop Approval", desc: "The platform's UI provides the leader with a powerful 1-click orchestration engine. Review, edit, and authorize instantly with extreme confidence." },
+              { num: "02", icon: "💎", title: "Human-In-The-Loop Approval", desc: "The platform&apos;s UI provides the leader with a powerful 1-click orchestration engine. Review, edit, and authorize instantly with extreme confidence." },
               { num: "03", icon: "⚡", title: "Persistent Automated Nudges", desc: "Decisions are parsed instantly. Deadlines map directly into individual WhatsApp utility alerts. Real-time updates update live project trackers." }
             ].map((step, i) => (
               <div key={i} className="glass-panel rounded-2xl p-8 relative overflow-hidden group hover:border-[#00C2A8]/30 transition-all duration-300">
@@ -270,7 +279,7 @@ export default function PremiumKaaryaApp() {
 
             {/* STEP 1: CONTEXT METADATA COLLECTION */}
             {formStep === 1 && (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div>
                     <label className="text-[11px] uppercase tracking-widest font-bold text-slate-400 block mb-2">Meeting Focus / Identifier *</label>
@@ -291,9 +300,9 @@ export default function PremiumKaaryaApp() {
               </div>
             )}
 
-            {/* STEP 2: HIGH-FIDELITY payload CAPTURE (ADAPTIVE INTERFACE) */}
+            {/* STEP 2: HIGH-FIDELITY PAYLOAD CAPTURE (ADAPTIVE INTERFACE) */}
             {formStep === 2 && (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div>
                   <label className="text-[11px] uppercase tracking-widest font-bold text-slate-400 block mb-2">Session Directives / Target Agenda *</label>
                   <textarea className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none h-20 resize-none" value={meetingData.agenda} onChange={e => updateForm("agenda", e.target.value)} placeholder="1. ABS Deliverables Performance&#10;2. Multi-Platform Channel Distribution Testing&#10;3. Budget Operational Squeezes" />
@@ -345,9 +354,9 @@ export default function PremiumKaaryaApp() {
 
             {/* STEP 3: INDUSTRIAL WORKPLACE ROUTING */}
             {formStep === 3 && (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div>
-                  <label className="text-[11px] uppercase tracking-widest font-bold text-slate-400 block mb-2">Orchestrator Email Identifier *</label>
+                  <label className="text-[11px] uppercase tracking-widest font-bold text-slate-400 block mb-2">Your Professional Email Identifier *</label>
                   <input type="email" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none" value={meetingData.email} onChange={e => updateForm("email", e.target.value)} placeholder="yourname@statictechnologies.in" />
                 </div>
 
@@ -381,7 +390,7 @@ export default function PremiumKaaryaApp() {
 
         {/* HIGH DOPAMINE SUCCESS MATRIX FEEDBACK */}
         {activeTab === "submit" && isSubmitted && (
-          <div className="glass-panel rounded-3xl p-12 text-center border-[#00C2A8]/20 dopamine-glow animate-fade-in">
+          <div className="glass-panel rounded-3xl p-12 text-center border-[#00C2A8]/20 dopamine-glow">
             <div className="text-5xl mb-6">🎉</div>
             <h3 className="text-2xl font-headline font-800 text-white mb-2">Pipeline Execution Confirmed</h3>
             <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed mb-8">
@@ -389,14 +398,14 @@ export default function PremiumKaaryaApp() {
             </p>
             <div className="flex gap-4 justify-center">
               <button onClick={() => { setIsSubmitted(false); setFormStep(1); setMeetingData({ meeting_name: "", meeting_date: new Date().toISOString().split('T')[0], attendees: "", agenda: "", raw_notes: "", email: "", uploaded_file_name: "" }); }} className="px-6 py-3.5 rounded-xl text-sm font-bold border border-white/10 text-slate-300 hover:text-white transition-colors">Ingest New Assembly</button>
-              <button onClick={() => setTab("waitlist")} className="px-6 py-3.5 rounded-xl text-sm font-bold bg-[#00C2A8] text-[#0A1F3D]">Scale Team Strategy</button>
+              <button onClick={() => focusViewOnInteractiveWorkspace("waitlist")} className="px-6 py-3.5 rounded-xl text-sm font-bold bg-[#00C2A8] text-[#0A1F3D]">Scale Team Strategy</button>
             </div>
           </div>
         )}
 
         {/* PREMIUM ENTERPRISE ACCESS ACQUISITION PANEL */}
         {activeTab === "waitlist" && !waitlistSuccess && (
-          <div className="glass-panel rounded-3xl p-8 md:p-12 border-white/10 animate-fade-in">
+          <div className="glass-panel rounded-3xl p-8 md:p-12 border-white/10">
             <div className="mb-8">
               <h3 className="text-2xl font-headline font-800 text-white">Join the Beta Cohort</h3>
               <p className="text-sm text-slate-400 mt-1">First 50 operating teams acquire full-cycle permissions for 3 months with zero infrastructure charges.</p>
@@ -448,7 +457,7 @@ export default function PremiumKaaryaApp() {
         )}
 
         {activeTab === "waitlist" && waitlistSuccess && (
-          <div className="glass-panel rounded-3xl p-12 text-center border-[#00C2A8]/20 dopamine-glow animate-fade-in">
+          <div className="glass-panel rounded-3xl p-12 text-center border-[#00C2A8]/20 dopamine-glow">
             <div className="text-5xl mb-6">🙌</div>
             <h3 className="text-2xl font-headline font-800 text-white mb-2">Allocation Parameters Registered</h3>
             <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed mb-4">
