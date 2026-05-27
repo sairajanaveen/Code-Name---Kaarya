@@ -1,5 +1,5 @@
 import { integrationStatus } from "../../../lib/config";
-import { createMeeting } from "../../../lib/supabase";
+import { createMeeting, saveStructuredMeetingOutput } from "../../../lib/supabase";
 import { validateMeetingPayload } from "../../../lib/validate";
 import { config } from "../../../lib/config";
 import { extractAccountability } from "../../../lib/aiPipeline";
@@ -33,6 +33,7 @@ export default async function handler(req, res) {
     }
 
     const structured = await extractAccountability({ meeting, payload });
+    const saved = await saveStructuredMeetingOutput({ meetingId: meeting.id, structured });
     const notion = payload.destination_channels.includes("notion")
       ? await publishToNotion({ meeting, structured })
       : { skipped: true };
@@ -42,6 +43,7 @@ export default async function handler(req, res) {
       meeting,
       structured,
       integrations: integrationStatus(),
+      saved,
       make: makeResult,
       notion,
       delivery
