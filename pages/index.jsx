@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Cloud,
+  Copy,
   Database,
   FileText,
   Gauge,
@@ -192,6 +193,9 @@ export default function KaaryaV1() {
   const [meetings, setMeetings] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [prepQuestions, setPrepQuestions] = useState([]);
+  const [deliveryLogs, setDeliveryLogs] = useState([]);
+  const [historicalInsights, setHistoricalInsights] = useState(null);
+  const [shareMessage, setShareMessage] = useState("");
   const [integrations, setIntegrations] = useState({});
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -228,15 +232,19 @@ export default function KaaryaV1() {
   }, [openTasks.length, submission, tasks]);
 
   async function refreshDashboard() {
-    const [meetingResponse, taskResponse] = await Promise.all([
+    const [meetingResponse, taskResponse, insightResponse] = await Promise.all([
       fetch("/api/dashboard/meetings"),
-      fetch("/api/dashboard/tasks")
+      fetch("/api/dashboard/tasks"),
+      fetch("/api/dashboard/insights")
     ]);
     const meetingData = await meetingResponse.json();
     const taskData = await taskResponse.json();
+    const insightData = await insightResponse.json();
     setMeetings(meetingData.meetings || []);
     setTasks(taskData.tasks || []);
     setPrepQuestions(taskData.prep_questions || []);
+    setDeliveryLogs(taskData.delivery_logs || []);
+    setHistoricalInsights(insightData.insights || null);
     setIntegrations(meetingData.integrations || {});
   }
 
@@ -333,7 +341,37 @@ export default function KaaryaV1() {
     }
   }
 
+  async function copyTaskNudge(task) {
+    if (!task.update_token) {
+      setShareMessage("This task needs a fresh deployment before share links are available.");
+      return;
+    }
+    const response = await fetch(`/api/messages/task/${task.update_token}`);
+    const data = await response.json();
+    if (!response.ok) {
+      setShareMessage(data.error || "Could not create nudge.");
+      return;
+    }
+    await navigator.clipboard?.writeText(data.whatsapp_text);
+    setShareMessage("WhatsApp nudge copied. You can paste it into any chat.");
+  }
+
+  async function openWhatsAppNudge(task) {
+    if (!task.update_token) {
+      setShareMessage("This task needs a fresh deployment before WhatsApp links are available.");
+      return;
+    }
+    const response = await fetch(`/api/messages/task/${task.update_token}`);
+    const data = await response.json();
+    if (response.ok) window.open(data.whatsapp_url, "_blank", "noopener,noreferrer");
+  }
+
   const recordingLabel = `${Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:${(recordingSeconds % 60).toString().padStart(2, "0")}`;
+  const latestMeeting = meetings[0];
+  const latestTasks = latestMeeting ? tasks.filter((task) => task.meeting_id === latestMeeting.id) : [];
+  const latestPrepQuestions = latestMeeting ? prepQuestions.filter((item) => item.meeting_id === latestMeeting.id) : [];
+  const latestDeliveryLogs = latestMeeting ? deliveryLogs.filter((item) => item.meeting_id === latestMeeting.id) : [];
+  const latestEmailLog = latestDeliveryLogs.find((item) => item.channel === "email");
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#ededed] selection:bg-white/20">
@@ -538,6 +576,72 @@ export default function KaaryaV1() {
           </motion.form>
 
           <div className="space-y-5">
+            {latestMeeting && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Latest meeting report</div>
+                    <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{latestMeeting.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">{latestMeeting.summary || "Kaarya needs more meeting context before a reliable summary can be created."}</p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-right">
+                    <div className="text-2xl font-semibold text-white">{latestMeeting.readiness_score ?? readiness}</div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">ready score</div>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Actions</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestTasks.length}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Prep questions</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestPrepQuestions.length}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Email</div>
+                    <div className={`mt-2 text-xl font-semibold capitalize ${latestEmailLog?.status === "sent" ? "text-emerald-300" : latestEmailLog?.status === "failed" ? "text-rose-300" : "text-zinc-300"}`}>
+                      {latestEmailLog?.status || "not logged"}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Quality</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.quality_score ?? "-"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Productivity</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.productivity_score ?? "-"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Preparedness</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.preparedness_score ?? "-"}</div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {historicalInsights && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Gauge size={17} />
+                  Historical meeting intelligence
+                </div>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <InsightCard icon={BarChart3} label="Meetings" value={historicalInsights.total_meetings} sub="Captured in Kaarya memory." />
+                  <InsightCard icon={ClipboardCheck} label="Open Tasks" value={historicalInsights.open_tasks} sub="Still need follow-through." />
+                  <InsightCard icon={ShieldCheck} label="Avg Readiness" value={`${historicalInsights.average_readiness}%`} sub="Across meeting history." />
+                  <InsightCard icon={Users} label="Loaded Owner" value={historicalInsights.most_loaded_owner} sub="Most assigned action items." />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {historicalInsights.insights?.map((item) => (
+                    <div key={item} className="rounded-lg bg-white/[0.035] p-3 text-sm text-zinc-300">{item}</div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
               <div className="mb-5 flex items-start justify-between">
                 <div>
@@ -571,7 +675,23 @@ export default function KaaryaV1() {
                 </div>
                 <FileText className="text-zinc-500" size={21} />
               </div>
-              <TaskTable tasks={tasks.slice(0, 6)} />
+              <TaskTable tasks={(latestTasks.length ? latestTasks : tasks).slice(0, 6)} />
+              <div className="mt-4 space-y-2">
+                {(latestTasks.length ? latestTasks : tasks).slice(0, 3).map((task) => (
+                  <div key={`share-${task.id}`} className="flex flex-col gap-2 rounded-lg bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm text-zinc-300">{task.owner || "Stakeholder"} nudge</div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => copyTaskNudge(task)} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:text-white">
+                        <Copy size={14} /> Copy
+                      </button>
+                      <button type="button" onClick={() => openWhatsAppNudge(task)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">
+                        WhatsApp
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {shareMessage && <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">{shareMessage}</div>}
+              </div>
             </section>
 
             <section className="grid gap-5 md:grid-cols-2">
@@ -581,7 +701,7 @@ export default function KaaryaV1() {
                   Next meeting prep
                 </div>
                 <div className="space-y-3">
-                  {prepQuestions.slice(0, 3).map((item) => (
+                  {(latestPrepQuestions.length ? latestPrepQuestions : prepQuestions).slice(0, 3).map((item) => (
                     <div key={item.id} className="rounded-lg bg-white/[0.035] p-3 text-sm leading-6 text-zinc-300">
                       {item.question}
                       <div className="mt-2 text-xs text-zinc-500">{item.intended_owner || item.intended_team || "Team"} should answer this before the next call.</div>
