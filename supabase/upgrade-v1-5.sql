@@ -29,6 +29,7 @@ alter table meetings add column if not exists created_by uuid references auth.us
 alter table meetings add column if not exists quality_score integer check (quality_score between 0 and 100);
 alter table meetings add column if not exists productivity_score integer check (productivity_score between 0 and 100);
 alter table meetings add column if not exists preparedness_score integer check (preparedness_score between 0 and 100);
+alter table meetings add column if not exists efficiency_score integer check (efficiency_score between 0 and 100);
 
 alter table participants add column if not exists organization_id uuid references organizations(id) on delete set null;
 
