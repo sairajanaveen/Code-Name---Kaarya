@@ -1,4 +1,4 @@
-import { getTaskByUpdateToken } from "../../../../lib/supabase";
+import { getTaskByUpdateToken, markTaskNudged } from "../../../../lib/supabase";
 import { buildWhatsAppShareUrl, buildWhatsAppTaskNudge } from "../../../../lib/templates";
 
 export default async function handler(req, res) {
@@ -15,6 +15,7 @@ export default async function handler(req, res) {
   const host = req.headers.host ? `https://${req.headers.host}` : "";
   const updateUrl = `${host}/task/${token}`;
   const whatsappText = buildWhatsAppTaskNudge({ task, updateUrl });
+  await markTaskNudged(token, "whatsapp");
 
   return res.status(200).json({
     task,

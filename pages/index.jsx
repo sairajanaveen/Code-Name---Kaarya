@@ -6,12 +6,14 @@ import {
   CalendarPlus,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Cloud,
   Copy,
   Database,
   FileText,
   Gauge,
   Loader2,
+  LogIn,
   Mail,
   MessageSquare,
   Mic,
@@ -114,29 +116,49 @@ function FlowMap({ activeIndex }) {
 
 function TaskTable({ tasks }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-white/10">
-      <div className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr] gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-        <span>Action</span>
-        <span>Owner</span>
-        <span>Team</span>
-        <span>Due</span>
-        <span>Status</span>
+    <div className="overflow-x-auto rounded-lg border border-white/10">
+      <div className="min-w-[920px]">
+        <div className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr] gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+          <span>Action</span>
+          <span>Owner</span>
+          <span>Team</span>
+          <span>Due</span>
+          <span>Status</span>
+          <span>Last nudge</span>
+          <span>Update</span>
+        </div>
+        {tasks.map((task) => {
+          const updateUrl = task.update_token ? `/task/${task.update_token}` : "";
+          const rawLastNudge = task.last_nudged_at || task.last_nudge_at || task.last_nudge;
+          const nudgeDate = rawLastNudge ? new Date(rawLastNudge) : null;
+          const lastNudge = nudgeDate && !Number.isNaN(nudgeDate.getTime())
+            ? nudgeDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+            : "Not sent";
+          return (
+            <motion.div
+              key={task.id}
+              layout
+              className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr] gap-3 border-b border-white/5 px-4 py-4 text-sm last:border-b-0"
+            >
+              <span className="text-zinc-200">{task.task}</span>
+              <span className="text-zinc-400">{task.owner || "Unassigned"}</span>
+              <span className="text-zinc-400">{task.team || "-"}</span>
+              <span className="text-zinc-400">{task.due_date || "-"}</span>
+              <span className={`capitalize ${task.status === "blocked" ? "text-rose-300" : task.status === "done" ? "text-emerald-300" : "text-amber-200"}`}>
+                {String(task.status || "pending").replace("_", " ")}
+              </span>
+              <span className="text-zinc-500">{lastNudge}</span>
+              {updateUrl ? (
+                <a className="text-zinc-200 underline decoration-white/20 underline-offset-4 hover:text-white" href={updateUrl} target="_blank" rel="noreferrer">
+                  Open link
+                </a>
+              ) : (
+                <span className="text-zinc-600">Pending</span>
+              )}
+            </motion.div>
+          );
+        })}
       </div>
-      {tasks.map((task) => (
-        <motion.div
-          key={task.id}
-          layout
-          className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr] gap-3 border-b border-white/5 px-4 py-4 text-sm last:border-b-0"
-        >
-          <span className="text-zinc-200">{task.task}</span>
-          <span className="text-zinc-400">{task.owner || "Unassigned"}</span>
-          <span className="text-zinc-400">{task.team || "-"}</span>
-          <span className="text-zinc-400">{task.due_date || "-"}</span>
-          <span className={`capitalize ${task.status === "blocked" ? "text-rose-300" : task.status === "done" ? "text-emerald-300" : "text-amber-200"}`}>
-            {String(task.status || "pending").replace("_", " ")}
-          </span>
-        </motion.div>
-      ))}
     </div>
   );
 }
@@ -190,6 +212,10 @@ export default function KaaryaV1() {
   const [activeFlow, setActiveFlow] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submission, setSubmission] = useState(null);
+  const [intakeStep, setIntakeStep] = useState(1);
+  const [draftText, setDraftText] = useState("");
+  const [refineInstruction, setRefineInstruction] = useState("");
+  const [isRefining, setIsRefining] = useState(false);
   const [meetings, setMeetings] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [prepQuestions, setPrepQuestions] = useState([]);
@@ -224,6 +250,8 @@ export default function KaaryaV1() {
   }, [isRecording]);
 
   const openTasks = useMemo(() => tasks.filter((task) => task.status !== "done"), [tasks]);
+  const noteWordCount = useMemo(() => form.raw_notes.trim().split(/\s+/).filter(Boolean).length, [form.raw_notes]);
+  const inputIsWeak = !form.audio_url && !form.attachment_url && noteWordCount > 0 && noteWordCount < 18;
   const readiness = useMemo(() => {
     if (submission?.structured?.readiness_score) return submission.structured.readiness_score;
     if (!tasks.length) return 72;
@@ -262,6 +290,24 @@ export default function KaaryaV1() {
           : [...prev.destination_channels, channel]
       };
     });
+  }
+
+  function startGoogleLogin() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setShareMessage("Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel to enable Google login.");
+      return;
+    }
+    const redirectTo = encodeURIComponent(window.location.origin);
+    window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
+  }
+
+  function goNextStep() {
+    setIntakeStep((step) => Math.min(3, step + 1));
+  }
+
+  function goBackStep() {
+    setIntakeStep((step) => Math.max(1, step - 1));
   }
 
   async function toggleRecording() {
@@ -313,6 +359,14 @@ export default function KaaryaV1() {
 
   async function submitMeeting(event) {
     event.preventDefault();
+    if (!form.raw_notes && !form.audio_url && !form.attachment_url) {
+      setSubmission({ ok: false, error: "Add meeting notes, a transcript, or a voice note before creating action items." });
+      return;
+    }
+    if (inputIsWeak) {
+      setSubmission({ ok: false, error: "This looks too short for reliable action items. Add decisions, owners, deadlines, or blockers." });
+      return;
+    }
     setIsSubmitting(true);
     setSubmission(null);
 
@@ -325,13 +379,18 @@ export default function KaaryaV1() {
       const response = await fetch("/api/meetings/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, review_before_send: true })
       });
       const data = await response.json();
       setSubmission({ ok: response.ok, ...data });
+      if (response.ok) {
+        setDraftText("");
+        setIntakeStep(3);
+      }
       if (data.structured?.action_items?.length) {
-        setTasks(data.structured.action_items.map((item, index) => ({ ...item, id: `new-${index}` })));
-        setPrepQuestions(data.structured.prep_questions.map((item, index) => ({ ...item, id: `prep-new-${index}` })));
+        const meetingId = data.meeting?.id || submission?.meeting?.id || latestMeeting?.id;
+        setTasks(data.structured.action_items.map((item, index) => ({ ...item, meeting_id: meetingId, id: `new-${index}` })));
+        setPrepQuestions(data.structured.prep_questions.map((item, index) => ({ ...item, meeting_id: meetingId, id: `prep-new-${index}` })));
       }
       await refreshDashboard();
     } catch (error) {
@@ -364,6 +423,77 @@ export default function KaaryaV1() {
     const response = await fetch(`/api/messages/task/${task.update_token}`);
     const data = await response.json();
     if (response.ok) window.open(data.whatsapp_url, "_blank", "noopener,noreferrer");
+  }
+
+  async function createDraft(type = "email") {
+    const meeting = submission?.meeting || latestMeeting;
+    const actionItems = submission?.structured?.action_items || latestTasks;
+    const prep = submission?.structured?.prep_questions || latestPrepQuestions;
+    if (!meeting) return "";
+    const response = await fetch("/api/messages/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meeting, tasks: actionItems, prep_questions: prep, type })
+    });
+    const data = await response.json();
+    if (response.ok) {
+      setDraftText(data.text);
+      if (type === "prep" && data.whatsapp_url) window.open(data.whatsapp_url, "_blank", "noopener,noreferrer");
+      return data.text;
+    }
+    setShareMessage(data.error || "Could not create draft.");
+    return "";
+  }
+
+  async function copyDraft() {
+    const text = draftText || await createDraft("email");
+    if (text) await navigator.clipboard?.writeText(text);
+    setShareMessage("Draft copied. You can paste it into email, Word, WhatsApp, or Teams.");
+  }
+
+  async function sendEditedDraft() {
+    const meeting = submission?.meeting || latestMeeting;
+    const text = draftText || await createDraft("email");
+    const to = form.email || meeting?.email;
+    if (!meeting || !text || !to) {
+      setShareMessage("Create a draft and add a recipient email before sending.");
+      return;
+    }
+    const response = await fetch("/api/messages/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to,
+        subject: `Kaarya action items: ${meeting.title}`,
+        text,
+        meeting_id: meeting.id
+      })
+    });
+    const data = await response.json();
+    setShareMessage(response.ok ? "Email sent directly from Kaarya." : data.error || "Email could not be sent.");
+    if (response.ok) await refreshDashboard();
+  }
+
+  async function refineOutput() {
+    if (!refineInstruction.trim() || !submission?.structured) return;
+    setIsRefining(true);
+    const response = await fetch("/api/refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: refineInstruction, structured: submission.structured })
+    });
+    const data = await response.json();
+    if (response.ok) {
+      const meetingId = submission?.meeting?.id || latestMeeting?.id;
+      setSubmission((prev) => ({ ...prev, structured: data.structured }));
+      setTasks(data.structured.action_items.map((item, index) => ({ ...item, meeting_id: meetingId, id: `refined-${index}` })));
+      setPrepQuestions(data.structured.prep_questions.map((item, index) => ({ ...item, meeting_id: meetingId, id: `refined-prep-${index}` })));
+      setRefineInstruction("");
+      setShareMessage("Output refined. Review it before sending.");
+    } else {
+      setShareMessage(data.error || "Could not refine output.");
+    }
+    setIsRefining(false);
   }
 
   const recordingLabel = `${Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:${(recordingSeconds % 60).toString().padStart(2, "0")}`;
@@ -402,6 +532,9 @@ export default function KaaryaV1() {
                 {key}
               </div>
             ))}
+            <button onClick={startGoogleLogin} className="ml-2 flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">
+              <LogIn size={14} /> Continue with Google
+            </button>
           </div>
         </div>
       </nav>
@@ -476,88 +609,140 @@ export default function KaaryaV1() {
               <Cloud className="mt-1 text-zinc-500" size={22} />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Meeting name">
-                <input className={inputClass} value={form.meeting_name} onChange={(e) => update("meeting_name", e.target.value)} placeholder="Q3 roadmap sync" />
-              </Field>
-              <Field label="Meeting date">
-                <input className={inputClass} type="date" value={form.meeting_date} onChange={(e) => update("meeting_date", e.target.value)} />
-              </Field>
-            </div>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <Field label="Owner email">
-                <input className={inputClass} type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="naveen@company.com" />
-              </Field>
-              <Field label="Language hint">
-                <input className={inputClass} value={form.language_hint} onChange={(e) => update("language_hint", e.target.value)} placeholder="auto, hi-IN, ta-IN, te-IN" />
-              </Field>
-            </div>
-
-            <div className="mt-4">
-              <Field label="Accountable people or teams">
-                <input className={inputClass} value={form.attendees} onChange={(e) => update("attendees", e.target.value)} placeholder="Ravi - Growth, Meera - CS, Ops Team" />
-              </Field>
-            </div>
-
-            <div className="mt-4">
-              <Field label="Agenda">
-                <input className={inputClass} value={form.agenda} onChange={(e) => update("agenda", e.target.value)} placeholder="Renewals, rollout blockers, next meeting prep" />
-              </Field>
-            </div>
-
-            <div className="mt-4">
-              <Field label="Transcript or rough notes">
-                <textarea
-                  className={`${inputClass} min-h-[150px] resize-none leading-6`}
-                  value={form.raw_notes}
-                  onChange={(e) => update("raw_notes", e.target.value)}
-                  placeholder="Paste meeting notes, chat dumps, or transcript here. Short, messy input is fine."
-                />
-              </Field>
-            </div>
-
-            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-white">Microphone capture</div>
-                  <div className="mt-1 text-xs text-zinc-500">{audioStatus || "Record a voice note and attach it to the pipeline."}</div>
-                </div>
+            <div className="mb-6 grid grid-cols-3 gap-2 rounded-lg border border-white/10 bg-white/[0.035] p-1">
+              {[
+                [1, "Capture"],
+                [2, "People"],
+                [3, "Send"]
+              ].map(([step, label]) => (
                 <button
+                  key={step}
                   type="button"
-                  onClick={toggleRecording}
-                  className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${
-                    isRecording ? "bg-rose-500/20 text-rose-200" : "bg-white text-black hover:bg-zinc-200"
-                  }`}
+                  onClick={() => setIntakeStep(step)}
+                  className={`rounded-md px-3 py-2 text-xs font-semibold transition ${intakeStep === step ? "bg-white text-black" : "text-zinc-400 hover:text-white"}`}
                 >
-                  {isRecording ? <Square size={16} /> : <Mic size={16} />}
-                  {isRecording ? recordingLabel : "Record"}
+                  {step}. {label}
                 </button>
-              </div>
+              ))}
             </div>
 
-            <div className="mt-5">
-              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Delivery channels</div>
-              <div className="flex flex-wrap gap-2">
-                {["email", "dashboard", "notion", "teams", "slack"].map((channel) => (
-                  <ChannelToggle
-                    key={channel}
-                    channel={channel}
-                    active={form.destination_channels.includes(channel)}
-                    onClick={() => toggleChannel(channel)}
-                  />
-                ))}
-              </div>
+            <AnimatePresence mode="wait">
+              {intakeStep === 1 && (
+                <motion.div key="capture" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="What was this meeting about?">
+                    <input className={inputClass} value={form.meeting_name} onChange={(e) => update("meeting_name", e.target.value)} placeholder="Example: Finance review, client follow-up, hiring interview" />
+                  </Field>
+                  <Field label="Paste notes, transcript, or messy discussion">
+                    <textarea
+                      className={`${inputClass} min-h-[220px] resize-none leading-6`}
+                      value={form.raw_notes}
+                      onChange={(e) => update("raw_notes", e.target.value)}
+                      placeholder="Paste whatever you have. Kaarya will find owners, tasks, blockers, and prep questions."
+                    />
+                  </Field>
+                  <div className={`rounded-lg border p-3 text-sm ${inputIsWeak ? "border-amber-300/25 bg-amber-300/10 text-amber-100" : "border-white/10 bg-white/[0.035] text-zinc-400"}`}>
+                    {inputIsWeak ? "Add more context so Kaarya can create reliable action items." : `${noteWordCount} words captured. Longer notes unlock better accountability.`}
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-white">Prefer speaking?</div>
+                        <div className="mt-1 text-xs text-zinc-500">{audioStatus || "Record a voice note and attach it to the pipeline."}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={toggleRecording}
+                        className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${
+                          isRecording ? "bg-rose-500/20 text-rose-200" : "bg-white text-black hover:bg-zinc-200"
+                        }`}
+                      >
+                        {isRecording ? <Square size={16} /> : <Mic size={16} />}
+                        {isRecording ? recordingLabel : "Record"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {intakeStep === 2 && (
+                <motion.div key="people" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="Who should Kaarya look for?">
+                    <input className={inputClass} value={form.attendees} onChange={(e) => update("attendees", e.target.value)} placeholder="Example: Ravi - Finance, Meera - HR, Ops Team" />
+                  </Field>
+                  <Field label="What was the intended outcome?">
+                    <input className={inputClass} value={form.agenda} onChange={(e) => update("agenda", e.target.value)} placeholder="Example: finalize appraisal decisions, unblock client delivery" />
+                  </Field>
+                  <Field label="Meeting date">
+                    <input className={inputClass} type="date" value={form.meeting_date} onChange={(e) => update("meeting_date", e.target.value)} />
+                  </Field>
+                </motion.div>
+              )}
+
+              {intakeStep === 3 && (
+                <motion.div key="send" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="Where should we send the report?">
+                    <input className={inputClass} type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@company.com" />
+                  </Field>
+                  <Field label="Language, if you know it">
+                    <input className={inputClass} value={form.language_hint} onChange={(e) => update("language_hint", e.target.value)} placeholder="auto, Hindi-English, Telugu-English" />
+                  </Field>
+                  <div>
+                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Delivery channels</div>
+                    <div className="flex flex-wrap gap-2">
+                      {["email", "dashboard", "notion", "teams", "slack"].map((channel) => (
+                        <ChannelToggle
+                          key={channel}
+                          channel={channel}
+                          active={form.destination_channels.includes(channel)}
+                          onClick={() => toggleChannel(channel)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                    Kaarya will draft everything first. You can copy, edit, refine, send later, or share on WhatsApp before stakeholders receive it.
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="mt-6 flex gap-3">
+              {intakeStep > 1 && (
+                <button type="button" onClick={goBackStep} className="rounded-lg border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-300">
+                  Back
+                </button>
+              )}
+              {intakeStep < 3 && (
+                <button type="button" onClick={goNextStep} className="flex-1 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-black">
+                  Continue
+                </button>
+              )}
             </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="mt-7 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-60"
-            >
-              {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}
-              {isSubmitting ? "Running accountability pipeline" : "Create action system"}
-            </button>
+            {intakeStep === 3 && (
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-60"
+              >
+                {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}
+                {isSubmitting ? "Running accountability pipeline" : "Create action system"}
+              </button>
+            )}
+
+            {isSubmitting && (
+              <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Loader2 size={16} className="animate-spin" />
+                  Processing your meeting
+                </div>
+                <div className="grid gap-2 text-xs text-zinc-400 sm:grid-cols-3">
+                  <span>1. Reading context</span>
+                  <span>2. Extracting owners</span>
+                  <span>3. Drafting nudges</span>
+                </div>
+              </div>
+            )}
 
             <AnimatePresence>
               {submission && (
@@ -638,6 +823,53 @@ export default function KaaryaV1() {
                   {historicalInsights.insights?.map((item) => (
                     <div key={item} className="rounded-lg bg-white/[0.035] p-3 text-sm text-zinc-300">{item}</div>
                   ))}
+                </div>
+              </section>
+            )}
+
+            {submission?.structured && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Sparkles size={17} />
+                  Review and refine before sending
+                </div>
+                <p className="text-sm leading-6 text-zinc-400">
+                  The output is a draft. Ask Kaarya to make it sharper, more formal, shorter for WhatsApp, split by team, or add missing owners.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button type="button" onClick={() => createDraft("email")} className="rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200 hover:text-white">
+                    Create email draft
+                  </button>
+                  <button type="button" onClick={() => createDraft("prep")} className="rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200 hover:text-white">
+                    Share prep on WhatsApp
+                  </button>
+                  <button type="button" onClick={copyDraft} className="rounded-lg bg-white px-4 py-3 text-sm font-semibold text-black">
+                    Copy draft
+                  </button>
+                  <button type="button" onClick={sendEditedDraft} className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-4 py-3 text-sm font-semibold text-emerald-100">
+                    Send email now
+                  </button>
+                  <button type="button" onClick={() => setShareMessage("Saved as a send-later draft. Delivery scheduling will use this draft once Resend/cron is connected.")} className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200">
+                    <Clock size={15} /> Send later
+                  </button>
+                </div>
+                {draftText && (
+                  <textarea
+                    value={draftText}
+                    onChange={(event) => setDraftText(event.target.value)}
+                    className="mt-4 min-h-[220px] w-full resize-none rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm leading-6 text-white outline-none focus:border-white/30"
+                  />
+                )}
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    value={refineInstruction}
+                    onChange={(event) => setRefineInstruction(event.target.value)}
+                    className="flex-1 rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-white/30"
+                    placeholder="Ask Kaarya: make this more formal, split by team, add missing prep questions..."
+                  />
+                  <button type="button" onClick={refineOutput} disabled={isRefining} className="rounded-lg bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-60">
+                    {isRefining ? "Refining..." : "Refine"}
+                  </button>
                 </div>
               </section>
             )}
