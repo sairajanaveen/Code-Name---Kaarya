@@ -1,25 +1,14 @@
 import { config } from "./config";
+import { sendDirectEmail } from "./email";
+import { buildPostMeetingEmail } from "./templates";
 
 export function buildPlainEmail({ meeting, structured, dashboardUrl = "" }) {
-  const rows = structured.action_items.map((item, index) => (
-    `${index + 1}. ${item.task}\nOwner: ${item.owner || "Unassigned"}\nTeam: ${item.team || "-"}\nDue: ${item.due_date || "-"}\nPriority: ${item.priority}\nStatus: ${item.status}\nEvidence: ${item.evidence || "-"}`
-  )).join("\n\n");
-
-  const questions = structured.prep_questions.map((item, index) => `${index + 1}. ${item.question} (${item.intended_owner || "Team"})`).join("\n");
-
-  return [
-    `Meeting: ${meeting.title}`,
-    `Date: ${meeting.meeting_date || "-"}`,
-    `Readiness Score: ${structured.readiness_score}/100`,
-    "",
-    "Action Items",
-    rows || "No action items captured.",
-    "",
-    "Next Meeting Prep Questions",
-    questions || "No prep questions captured.",
-    "",
-    dashboardUrl ? `Dashboard: ${dashboardUrl}` : ""
-  ].filter(Boolean).join("\n");
+  return buildPostMeetingEmail({
+    meeting,
+    tasks: structured.action_items,
+    prepQuestions: structured.prep_questions,
+    dashboardUrl
+  });
 }
 
 export async function postWebhook(url, body) {
@@ -43,12 +32,21 @@ export async function publishToChannels({ meeting, structured, payload }) {
   };
 
   const results = {};
-  if (payload.destination_channels.includes("email")) {
-    results.email = await postWebhook(config.emailWebhookUrl, {
+  if (payload.destination_channels.includes("email") && !payload.review_before_send) {
+    const subject = `Kaarya action items: ${meeting.title}`;
+    results.email = await sendDirectEmail({
       to: payload.email,
-      subject: `Kaarya action items: ${meeting.title}`,
+      subject,
       text: emailText
     });
+
+    if (!results.email.ok && config.emailWebhookUrl) {
+      results.email = await postWebhook(config.emailWebhookUrl, {
+        to: payload.email,
+        subject,
+        text: emailText
+      });
+    }
   }
   if (payload.destination_channels.includes("teams")) {
     results.teams = await postWebhook(config.teamsWebhookUrl, { text: emailText, ...compact });

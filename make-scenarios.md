@@ -1,11 +1,36 @@
 # Kaarya Make Scenario Setup
 
 ## Scenario 1: Intake
-- Trigger: custom webhook for `/api/meetings/submit` and Tally webhooks.
+- Website trigger: `/api/meetings/submit`.
+- Tally trigger: `Tally - Watch New Responses`.
+- For Tally, add one HTTP module immediately after the Tally trigger:
+  - Method: `POST`
+  - URL: `https://code-name-kaarya.vercel.app/api/meetings/submit`
+  - Body type: `Raw`
+  - Content type: `JSON`
+  - Body: map Tally fields into the normalized payload below.
 - Validate required fields: meeting name, date, email, transcript/audio/attachment.
 - Store raw transcript or file URL in Supabase.
 - Create or update `meetings` record with `status=intake_received`.
-- Trigger Scenario 2 with the meeting id.
+- Trigger downstream publishing only after Kaarya returns success.
+
+Recommended Tally-to-Kaarya HTTP body:
+
+```json
+{
+  "source": "tally",
+  "meeting_name": "{{Meeting Name}}",
+  "meeting_date": "{{Meeting Date}}",
+  "attendees": "{{Attendees}}",
+  "agenda": "{{Agenda}}",
+  "raw_notes": "{{Meeting Notes}}",
+  "email": "{{Your Email}}",
+  "language_hint": "auto",
+  "destination_channels": ["email", "dashboard", "notion", "teams", "slack"]
+}
+```
+
+Do not keep a separate Tally -> Gemini -> Gmail path for production. Tally and the website should both enter the same Kaarya API so Supabase, dashboard, AI output, and delivery stay consistent.
 
 ## Scenario 2: AI Processing
 - Fetch meeting record and input assets from Supabase.

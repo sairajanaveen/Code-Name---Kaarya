@@ -1,5 +1,6 @@
 import { integrationStatus } from "../../../lib/config";
-import { createMeeting } from "../../../lib/supabase";
+import { createMeeting, saveDeliveryLogs, saveStructuredMeetingOutput } from "../../../lib/supabase";
+import { normalizeIntakePayload } from "../../../lib/intake";
 import { validateMeetingPayload } from "../../../lib/validate";
 import { config } from "../../../lib/config";
 import { extractAccountability } from "../../../lib/aiPipeline";
@@ -11,7 +12,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { ok, payload, errors } = validateMeetingPayload(req.body);
+  const { ok, payload, errors } = validateMeetingPayload(normalizeIntakePayload(req.body));
   if (!ok) return res.status(400).json({ errors });
 
   try {
@@ -33,18 +34,22 @@ export default async function handler(req, res) {
     }
 
     const structured = await extractAccountability({ meeting, payload });
+    const saved = await saveStructuredMeetingOutput({ meetingId: meeting.id, structured });
     const notion = payload.destination_channels.includes("notion")
       ? await publishToNotion({ meeting, structured })
       : { skipped: true };
     const delivery = await publishToChannels({ meeting, structured, payload });
+    const deliveryLogs = await saveDeliveryLogs({ meetingId: meeting.id, results: delivery, payload });
 
     return res.status(200).json({
       meeting,
       structured,
       integrations: integrationStatus(),
+      saved,
       make: makeResult,
       notion,
-      delivery
+      delivery,
+      deliveryLogs
     });
   } catch (error) {
     return res.status(500).json({ error: error.message || "Submission failed" });

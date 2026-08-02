@@ -1,0 +1,1060 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarPlus,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock,
+  Copy,
+  Database,
+  FileText,
+  Gauge,
+  Loader2,
+  LogIn,
+  Mail,
+  MessageSquare,
+  Mic,
+  Network,
+  Play,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Square,
+  Table2,
+  Users
+} from "lucide-react";
+
+const ease = [0.16, 1, 0.3, 1];
+
+const pipeline = [
+  { key: "input", label: "Input", detail: "Form, Tally, mic, transcript", icon: Mic },
+  { key: "make", label: "Intake", detail: "Validation and routing", icon: Network },
+  { key: "storage", label: "Storage", detail: "Supabase records and files", icon: Database },
+  { key: "ai", label: "AI", detail: "Sarvam plus structured extraction", icon: Sparkles },
+  { key: "tasks", label: "Tasks", detail: "Owners, teams, due dates", icon: ClipboardCheck },
+  { key: "followup", label: "Follow-up", detail: "Email, dashboard, Teams, Slack", icon: Send }
+];
+
+const integrationLabels = {
+  make: "intake",
+  supabase: "storage",
+  sarvam: "language",
+  notion: "notion"
+};
+
+const defaultForm = {
+  source: "website",
+  meeting_name: "",
+  meeting_date: "",
+  attendees: "",
+  agenda: "",
+  raw_notes: "",
+  email: "",
+  language_hint: "",
+  audio_url: "",
+  attachment_url: "",
+  destination_channels: ["email", "dashboard", "notion", "teams", "slack"]
+};
+
+const demoMeeting = {
+  meeting_name: "Client implementation review",
+  meeting_date: new Date().toISOString().split("T")[0],
+  attendees: "Asha - Client Success, Rohan - Product, Priya - Operations, Finance Team",
+  agenda: "Confirm launch blockers, owner commitments, next client meeting readiness",
+  raw_notes: [
+    "Asha confirmed the client is ready for pilot launch if the onboarding checklist is shared today.",
+    "Rohan will fix the dashboard loading state and send a short Loom walkthrough before 5 PM.",
+    "Priya said operations cannot close the setup until vendor GST documents are received.",
+    "Finance team will verify payment terms and send the approved invoice format tomorrow morning.",
+    "Client asked for a single action table instead of a long summary.",
+    "Next meeting should review open blockers, proof of setup, and owner progress before discussing new features."
+  ].join("\n"),
+  email: "client.owner@example.com",
+  language_hint: "English"
+};
+
+function Logo() {
+  return (
+    <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white text-black shadow-[0_0_30px_rgba(255,255,255,0.16)]">
+      <ClipboardCheck size={19} strokeWidth={2.4} />
+    </div>
+  );
+}
+
+function StatusDot({ active }) {
+  return (
+    <span className={`h-2 w-2 rounded-full ${active ? "bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.8)]" : "bg-zinc-600"}`} />
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const inputClass = "w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-white/30 focus:bg-black/70";
+
+function FlowMap({ activeIndex }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-6">
+      {pipeline.map((step, index) => {
+        const Icon = step.icon;
+        const active = index <= activeIndex;
+        return (
+          <motion.div
+            key={step.key}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.06, duration: 0.5, ease }}
+            className={`relative min-h-[132px] rounded-lg border p-4 transition ${
+              active ? "border-white/20 bg-white/[0.075]" : "border-white/10 bg-white/[0.025]"
+            }`}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${active ? "bg-white text-black" : "bg-white/5 text-zinc-500"}`}>
+                <Icon size={17} />
+              </div>
+              <StatusDot active={active} />
+            </div>
+            <div className="text-sm font-semibold text-white">{step.label}</div>
+            <div className="mt-1 text-xs leading-5 text-zinc-500">{step.detail}</div>
+            {active && (
+              <motion.div
+                layoutId="flow-glow"
+                className="absolute inset-x-4 bottom-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent"
+              />
+            )}
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TaskTable({ tasks }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-white/10">
+      <div className="min-w-[920px]">
+        <div className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr] gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+          <span>Action</span>
+          <span>Owner</span>
+          <span>Team</span>
+          <span>Due</span>
+          <span>Status</span>
+          <span>Last nudge</span>
+          <span>Update</span>
+        </div>
+        {tasks.map((task) => {
+          const updateUrl = task.update_token ? `/task/${task.update_token}` : "";
+          const rawLastNudge = task.last_nudged_at || task.last_nudge_at || task.last_nudge;
+          const nudgeDate = rawLastNudge ? new Date(rawLastNudge) : null;
+          const lastNudge = nudgeDate && !Number.isNaN(nudgeDate.getTime())
+            ? nudgeDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+            : "Not sent";
+          return (
+            <motion.div
+              key={task.id}
+              layout
+              className="grid grid-cols-[1.5fr_0.8fr_0.7fr_0.7fr_0.6fr_0.7fr_0.7fr] gap-3 border-b border-white/5 px-4 py-4 text-sm last:border-b-0"
+            >
+              <span className="text-zinc-200">{task.task}</span>
+              <span className="text-zinc-400">{task.owner || "Unassigned"}</span>
+              <span className="text-zinc-400">{task.team || "-"}</span>
+              <span className="text-zinc-400">{task.due_date || "-"}</span>
+              <span className={`capitalize ${task.status === "blocked" ? "text-rose-300" : task.status === "done" ? "text-emerald-300" : "text-amber-200"}`}>
+                {String(task.status || "pending").replace("_", " ")}
+              </span>
+              <span className="text-zinc-500">{lastNudge}</span>
+              {updateUrl ? (
+                <a className="text-zinc-200 underline decoration-white/20 underline-offset-4 hover:text-white" href={updateUrl} target="_blank" rel="noreferrer">
+                  Open link
+                </a>
+              ) : (
+                <span className="text-zinc-600">Pending</span>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InsightCard({ icon: Icon, label, value, sub }) {
+  return (
+    <motion.div whileHover={{ y: -3 }} className="rounded-lg border border-white/10 bg-white/[0.045] p-5">
+      <div className="mb-5 flex items-center justify-between">
+        <Icon size={18} className="text-zinc-400" />
+        <div className="h-1.5 w-1.5 rounded-full bg-white/40" />
+      </div>
+      <div className="text-2xl font-semibold tracking-tight text-white">{value}</div>
+      <div className="mt-1 text-xs uppercase tracking-[0.16em] text-zinc-500">{label}</div>
+      <div className="mt-3 text-xs leading-5 text-zinc-400">{sub}</div>
+    </motion.div>
+  );
+}
+
+function ChannelToggle({ channel, active, onClick }) {
+  const labels = {
+    email: "Email",
+    dashboard: "Dashboard",
+    notion: "Notion",
+    teams: "Teams",
+    slack: "Slack"
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
+        active ? "border-white/25 bg-white text-black" : "border-white/10 bg-white/[0.035] text-zinc-400 hover:text-white"
+      }`}
+    >
+      {labels[channel]}
+    </button>
+  );
+}
+
+function fileToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+export default function KaaryaV1() {
+  const [form, setForm] = useState(defaultForm);
+  const [activeFlow, setActiveFlow] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submission, setSubmission] = useState(null);
+  const [intakeStep, setIntakeStep] = useState(1);
+  const [draftText, setDraftText] = useState("");
+  const [refineInstruction, setRefineInstruction] = useState("");
+  const [isRefining, setIsRefining] = useState(false);
+  const [meetings, setMeetings] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [prepQuestions, setPrepQuestions] = useState([]);
+  const [deliveryLogs, setDeliveryLogs] = useState([]);
+  const [historicalInsights, setHistoricalInsights] = useState(null);
+  const [shareMessage, setShareMessage] = useState("");
+  const [dashboardError, setDashboardError] = useState("");
+  const [integrations, setIntegrations] = useState({});
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [audioStatus, setAudioStatus] = useState("");
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, meeting_date: new Date().toISOString().split("T")[0] }));
+    refreshDashboard();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setActiveFlow((current) => (current + 1) % pipeline.length), 1800);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (isRecording) {
+      timerRef.current = setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isRecording]);
+
+  const openTasks = useMemo(() => tasks.filter((task) => task.status !== "done"), [tasks]);
+  const noteWordCount = useMemo(() => form.raw_notes.trim().split(/\s+/).filter(Boolean).length, [form.raw_notes]);
+  const inputIsWeak = !form.audio_url && !form.attachment_url && noteWordCount > 0 && noteWordCount < 18;
+  const canContinueCapture = Boolean(form.meeting_name.trim() && (noteWordCount >= 18 || form.audio_url || form.attachment_url));
+  const canContinuePeople = Boolean(form.attendees.trim() || form.agenda.trim());
+  const readiness = useMemo(() => {
+    if (submission?.structured?.readiness_score) return submission.structured.readiness_score;
+    if (!tasks.length) return 72;
+    const blocked = tasks.filter((task) => task.status === "blocked").length;
+    return Math.max(35, Math.round(90 - blocked * 14 - openTasks.length * 3));
+  }, [openTasks.length, submission, tasks]);
+
+  async function refreshDashboard() {
+    try {
+      const [meetingResponse, taskResponse, insightResponse] = await Promise.all([
+        fetch("/api/dashboard/meetings"),
+        fetch("/api/dashboard/tasks"),
+        fetch("/api/dashboard/insights")
+      ]);
+      const meetingData = await meetingResponse.json();
+      const taskData = await taskResponse.json();
+      const insightData = await insightResponse.json();
+      setMeetings(meetingData.meetings || []);
+      setTasks(taskData.tasks || []);
+      setPrepQuestions(taskData.prep_questions || []);
+      setDeliveryLogs(taskData.delivery_logs || []);
+      setHistoricalInsights(insightData.insights || null);
+      setIntegrations(meetingData.integrations || {});
+      setDashboardError("");
+    } catch {
+      setDashboardError("Live dashboard sync is taking longer than expected. Intake still works.");
+    }
+  }
+
+  function update(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleChannel(channel) {
+    setForm((prev) => {
+      const has = prev.destination_channels.includes(channel);
+      return {
+        ...prev,
+        destination_channels: has
+          ? prev.destination_channels.filter((item) => item !== channel)
+          : [...prev.destination_channels, channel]
+      };
+    });
+  }
+
+  function startGoogleLogin() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      setShareMessage("Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel to enable Google login.");
+      return;
+    }
+    const redirectTo = encodeURIComponent(window.location.origin);
+    window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
+  }
+
+  function goNextStep() {
+    if (intakeStep === 1 && !canContinueCapture) {
+      setShareMessage("Add a meeting name and at least a few useful lines of context before moving ahead.");
+      return;
+    }
+    if (intakeStep === 2 && !canContinuePeople) {
+      setShareMessage("Add at least the people involved or the intended outcome.");
+      return;
+    }
+    setIntakeStep((step) => Math.min(3, step + 1));
+  }
+
+  function goBackStep() {
+    setIntakeStep((step) => Math.max(1, step - 1));
+  }
+
+  async function toggleRecording() {
+    if (isRecording) {
+      recorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setAudioStatus("Microphone recording is not supported in this browser.");
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    chunksRef.current = [];
+    recorderRef.current = recorder;
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
+    recorder.onstop = async () => {
+      setAudioStatus("Uploading audio...");
+      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      const base64 = await fileToBase64(blob);
+      const response = await fetch("/api/audio/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: `kaarya-meeting-${Date.now()}.webm`,
+          mimeType: "audio/webm",
+          base64
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        update("audio_url", data.url);
+        setAudioStatus("Audio attached to this meeting.");
+      } else {
+        setAudioStatus(data.error || "Audio upload failed.");
+      }
+      stream.getTracks().forEach((track) => track.stop());
+    };
+    setRecordingSeconds(0);
+    setAudioStatus("Recording...");
+    recorder.start();
+    setIsRecording(true);
+  }
+
+  function loadDemoMeeting() {
+    setForm((prev) => ({
+      ...prev,
+      ...demoMeeting,
+      destination_channels: prev.destination_channels
+    }));
+    setIntakeStep(1);
+    setSubmission(null);
+    setDraftText("");
+    setShareMessage("Demo meeting loaded. Review it, then continue through the flow.");
+  }
+
+  async function submitMeeting(event) {
+    event.preventDefault();
+    if (!form.raw_notes && !form.audio_url && !form.attachment_url) {
+      setSubmission({ ok: false, error: "Add meeting notes, a transcript, or a voice note before creating action items." });
+      return;
+    }
+    if (inputIsWeak) {
+      setSubmission({ ok: false, error: "This looks too short for reliable action items. Add decisions, owners, deadlines, or blockers." });
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmission(null);
+
+    const stages = [0, 1, 2, 3, 4, 5];
+    stages.forEach((stage, index) => {
+      setTimeout(() => setActiveFlow(stage), index * 360);
+    });
+
+    try {
+      const response = await fetch("/api/meetings/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, review_before_send: true })
+      });
+      const data = await response.json();
+      setSubmission({ ok: response.ok, ...data });
+      if (response.ok) {
+        setDraftText("");
+        setIntakeStep(3);
+      }
+      if (data.structured?.action_items?.length) {
+        const meetingId = data.meeting?.id || submission?.meeting?.id || latestMeeting?.id;
+        setTasks(data.structured.action_items.map((item, index) => ({ ...item, meeting_id: meetingId, id: `new-${index}` })));
+        setPrepQuestions(data.structured.prep_questions.map((item, index) => ({ ...item, meeting_id: meetingId, id: `prep-new-${index}` })));
+      }
+      await refreshDashboard();
+    } catch (error) {
+      setSubmission({ ok: false, error: error.message });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function copyTaskNudge(task) {
+    if (!task.update_token) {
+      setShareMessage("This task needs a fresh deployment before share links are available.");
+      return;
+    }
+    const response = await fetch(`/api/messages/task/${task.update_token}`);
+    const data = await response.json();
+    if (!response.ok) {
+      setShareMessage(data.error || "Could not create nudge.");
+      return;
+    }
+    await navigator.clipboard?.writeText(data.whatsapp_text);
+    setShareMessage("WhatsApp nudge copied. You can paste it into any chat.");
+  }
+
+  async function openWhatsAppNudge(task) {
+    if (!task.update_token) {
+      setShareMessage("This task needs a fresh deployment before WhatsApp links are available.");
+      return;
+    }
+    const response = await fetch(`/api/messages/task/${task.update_token}`);
+    const data = await response.json();
+    if (response.ok) window.open(data.whatsapp_url, "_blank", "noopener,noreferrer");
+  }
+
+  async function createDraft(type = "email") {
+    const meeting = submission?.meeting || latestMeeting;
+    const actionItems = submission?.structured?.action_items || latestTasks;
+    const prep = submission?.structured?.prep_questions || latestPrepQuestions;
+    if (!meeting) return "";
+    const response = await fetch("/api/messages/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meeting, tasks: actionItems, prep_questions: prep, type })
+    });
+    const data = await response.json();
+    if (response.ok) {
+      setDraftText(data.text);
+      if (type === "prep" && data.whatsapp_url) window.open(data.whatsapp_url, "_blank", "noopener,noreferrer");
+      return data.text;
+    }
+    setShareMessage(data.error || "Could not create draft.");
+    return "";
+  }
+
+  async function copyDraft() {
+    const text = draftText || await createDraft("email");
+    if (text) await navigator.clipboard?.writeText(text);
+    setShareMessage("Draft copied. You can paste it into email, Word, WhatsApp, or Teams.");
+  }
+
+  async function sendEditedDraft() {
+    const meeting = submission?.meeting || latestMeeting;
+    const text = draftText || await createDraft("email");
+    const to = form.email || meeting?.email;
+    if (!meeting || !text || !to) {
+      setShareMessage("Create a draft and add a recipient email before sending.");
+      return;
+    }
+    const response = await fetch("/api/messages/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to,
+        subject: `Kaarya action items: ${meeting.title}`,
+        text,
+        meeting_id: meeting.id
+      })
+    });
+    const data = await response.json();
+    setShareMessage(response.ok ? "Email sent directly from Kaarya." : `${data.error || "Email could not be sent."} The draft is still editable and can be copied instantly.`);
+    if (response.ok) await refreshDashboard();
+  }
+
+  async function refineOutput() {
+    if (!refineInstruction.trim() || !submission?.structured) return;
+    setIsRefining(true);
+    const response = await fetch("/api/refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: refineInstruction, structured: submission.structured })
+    });
+    const data = await response.json();
+    if (response.ok) {
+      const meetingId = submission?.meeting?.id || latestMeeting?.id;
+      setSubmission((prev) => ({ ...prev, structured: data.structured }));
+      setTasks(data.structured.action_items.map((item, index) => ({ ...item, meeting_id: meetingId, id: `refined-${index}` })));
+      setPrepQuestions(data.structured.prep_questions.map((item, index) => ({ ...item, meeting_id: meetingId, id: `refined-prep-${index}` })));
+      setRefineInstruction("");
+      setShareMessage("Output refined. Review it before sending.");
+    } else {
+      setShareMessage(data.error || "Could not refine output.");
+    }
+    setIsRefining(false);
+  }
+
+  const recordingLabel = `${Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:${(recordingSeconds % 60).toString().padStart(2, "0")}`;
+  const latestMeeting = meetings[0];
+  const latestTasks = latestMeeting ? tasks.filter((task) => task.meeting_id === latestMeeting.id) : [];
+  const latestPrepQuestions = latestMeeting ? prepQuestions.filter((item) => item.meeting_id === latestMeeting.id) : [];
+  const latestDeliveryLogs = latestMeeting ? deliveryLogs.filter((item) => item.meeting_id === latestMeeting.id) : [];
+  const latestEmailLog = latestDeliveryLogs.find((item) => item.channel === "email");
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-[#ededed] selection:bg-white/20">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: Inter, system-ui, sans-serif; background: #050505; }
+        .grid-bg {
+          background-image:
+            linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
+          background-size: 42px 42px;
+        }
+      `}</style>
+
+      <nav className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-black/50 px-5 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Logo />
+            <div>
+              <div className="text-sm font-semibold text-white">Kaarya</div>
+              <div className="text-[11px] text-zinc-500">Conversations into accountability</div>
+            </div>
+          </div>
+          <div className="hidden items-center gap-2 md:flex">
+            {["make", "supabase", "sarvam", "notion"].map((key) => (
+              <div key={key} className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-zinc-400">
+                <StatusDot active={integrations[key]} />
+                {integrationLabels[key]}
+              </div>
+            ))}
+            <button onClick={startGoogleLogin} className="ml-2 flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">
+              <LogIn size={14} /> Continue with Google
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <main className="grid-bg relative overflow-hidden pt-24">
+        <section className="mx-auto max-w-7xl px-5 pb-14 pt-10">
+          <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+            <div>
+              <motion.div
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease }}
+                className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-3 py-1.5 text-xs text-zinc-400"
+              >
+                <Sparkles size={14} className="text-white" />
+                Meeting intelligence for prepared teams
+              </motion.div>
+              <motion.h1
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.75, delay: 0.06, ease }}
+                className="max-w-3xl text-5xl font-semibold tracking-tight text-white md:text-7xl"
+              >
+                No meeting should end as memory.
+              </motion.h1>
+              <motion.p
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.75, delay: 0.12, ease }}
+                className="mt-6 max-w-2xl text-lg leading-8 text-zinc-400"
+              >
+                Kaarya captures messy notes, transcripts, and voice input, then converts them into owners, due dates, prep questions, and periodic follow-ups.
+              </motion.p>
+              <div className="mt-7 grid gap-3 text-sm text-zinc-300 sm:grid-cols-3">
+                {["Your data stays in your workspace", "Human-review before sending", "Tasks sync to Notion"].map((item) => (
+                  <div key={item} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2">
+                    <ShieldCheck size={15} className="text-emerald-300" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.8, delay: 0.18, ease }}
+              className="rounded-lg border border-white/10 bg-black/50 p-5 shadow-2xl backdrop-blur-xl"
+            >
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-white">Live accountability flow</div>
+                  <div className="text-xs text-zinc-500">Website and Tally route into the same backend intelligence.</div>
+                </div>
+                <Play size={18} className="text-zinc-400" />
+              </div>
+              <FlowMap activeIndex={activeFlow} />
+            </motion.div>
+          </div>
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-8 md:grid-cols-4">
+          <InsightCard icon={Gauge} label="Readiness" value={`${readiness}%`} sub="Based on unresolved owners, blockers, and next-meeting prep risk." />
+          <InsightCard icon={Table2} label="Open Tasks" value={openTasks.length} sub="Action items remain visible until owners update progress." />
+          <InsightCard icon={MessageSquare} label="Follow-up" value="2 days" sub="Scheduled reminders keep accountability warm without WhatsApp cost." />
+          <InsightCard icon={ShieldCheck} label="Launch Stack" value="Ready" sub="Dashboard, email drafts, Notion tasks, and stakeholder nudges are connected." />
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-20 lg:grid-cols-[0.9fr_1.1fr]">
+          <motion.form
+            onSubmit={submitMeeting}
+            layout
+            className="rounded-lg border border-white/10 bg-black/60 p-5 shadow-2xl backdrop-blur-xl md:p-7"
+          >
+            <div className="mb-7 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight text-white">Submit meeting signal</h2>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">Paste notes or record voice. Kaarya turns the input into owners, tasks, prep questions, Notion entries, and reviewable emails.</p>
+              </div>
+              <button type="button" onClick={loadDemoMeeting} className="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 hover:text-white">
+                <Sparkles size={14} /> Load demo
+              </button>
+            </div>
+
+            <div className="mb-6 grid grid-cols-3 gap-2 rounded-lg border border-white/10 bg-white/[0.035] p-1">
+              {[
+                [1, "Capture"],
+                [2, "People"],
+                [3, "Send"]
+              ].map(([step, label]) => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => setIntakeStep(step)}
+                  className={`rounded-md px-3 py-2 text-xs font-semibold transition ${intakeStep === step ? "bg-white text-black" : "text-zinc-400 hover:text-white"}`}
+                >
+                  {step}. {label}
+                </button>
+              ))}
+            </div>
+
+            <AnimatePresence mode="wait">
+              {intakeStep === 1 && (
+                <motion.div key="capture" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="What was this meeting about?">
+                    <input className={inputClass} value={form.meeting_name} onChange={(e) => update("meeting_name", e.target.value)} placeholder="Example: Finance review, client follow-up, hiring interview" />
+                  </Field>
+                  <Field label="Paste notes, transcript, or messy discussion">
+                    <textarea
+                      className={`${inputClass} min-h-[220px] resize-none leading-6`}
+                      value={form.raw_notes}
+                      onChange={(e) => update("raw_notes", e.target.value)}
+                      placeholder="Paste whatever you have. Kaarya will find owners, tasks, blockers, and prep questions."
+                    />
+                  </Field>
+                  <div className={`rounded-lg border p-3 text-sm ${inputIsWeak ? "border-amber-300/25 bg-amber-300/10 text-amber-100" : "border-white/10 bg-white/[0.035] text-zinc-400"}`}>
+                    {inputIsWeak ? "Add more context so Kaarya can create reliable action items." : `${noteWordCount} words captured. Longer notes unlock better accountability.`}
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-white">Prefer speaking?</div>
+                        <div className="mt-1 text-xs text-zinc-500">{audioStatus || "Record a voice note and attach it to the pipeline."}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={toggleRecording}
+                        className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition ${
+                          isRecording ? "bg-rose-500/20 text-rose-200" : "bg-white text-black hover:bg-zinc-200"
+                        }`}
+                      >
+                        {isRecording ? <Square size={16} /> : <Mic size={16} />}
+                        {isRecording ? recordingLabel : "Record"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {intakeStep === 2 && (
+                <motion.div key="people" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="Who should Kaarya look for?">
+                    <input className={inputClass} value={form.attendees} onChange={(e) => update("attendees", e.target.value)} placeholder="Example: Ravi - Finance, Meera - HR, Ops Team" />
+                  </Field>
+                  <Field label="What was the intended outcome?">
+                    <input className={inputClass} value={form.agenda} onChange={(e) => update("agenda", e.target.value)} placeholder="Example: finalize appraisal decisions, unblock client delivery" />
+                  </Field>
+                  <Field label="Meeting date">
+                    <input className={inputClass} type="date" value={form.meeting_date} onChange={(e) => update("meeting_date", e.target.value)} />
+                  </Field>
+                </motion.div>
+              )}
+
+              {intakeStep === 3 && (
+                <motion.div key="send" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                  <Field label="Where should we send the report?">
+                    <input className={inputClass} type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@company.com" />
+                  </Field>
+                  <Field label="Language, if you know it">
+                    <input className={inputClass} value={form.language_hint} onChange={(e) => update("language_hint", e.target.value)} placeholder="auto, Hindi-English, Telugu-English" />
+                  </Field>
+                  <div>
+                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Delivery channels</div>
+                    <div className="flex flex-wrap gap-2">
+                      {["email", "dashboard", "notion", "teams", "slack"].map((channel) => (
+                        <ChannelToggle
+                          key={channel}
+                          channel={channel}
+                          active={form.destination_channels.includes(channel)}
+                          onClick={() => toggleChannel(channel)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                    Kaarya will draft everything first. You can copy, edit, refine, send later, or share on WhatsApp before stakeholders receive it.
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="mt-6 flex gap-3">
+              {intakeStep > 1 && (
+                <button type="button" onClick={goBackStep} className="rounded-lg border border-white/10 px-5 py-3 text-sm font-semibold text-zinc-300">
+                  Back
+                </button>
+              )}
+              {intakeStep < 3 && (
+                <button type="button" onClick={goNextStep} className="flex-1 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-black">
+                  Continue
+                </button>
+              )}
+            </div>
+            {shareMessage && (
+              <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300">
+                {shareMessage}
+              </div>
+            )}
+
+            {intakeStep === 3 && (
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-60"
+              >
+                {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}
+                {isSubmitting ? "Running accountability pipeline" : "Create action system"}
+              </button>
+            )}
+
+            {isSubmitting && (
+              <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Loader2 size={16} className="animate-spin" />
+                  Processing your meeting
+                </div>
+                <div className="grid gap-2 text-xs text-zinc-400 sm:grid-cols-3">
+                  <span>1. Reading context</span>
+                  <span>2. Extracting owners</span>
+                  <span>3. Drafting nudges</span>
+                </div>
+              </div>
+            )}
+
+            <AnimatePresence>
+              {submission && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className={`mt-5 rounded-lg border p-4 text-sm ${
+                    submission.ok ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-rose-400/25 bg-rose-400/10 text-rose-100"
+                  }`}
+                >
+                  {submission.ok ? "Draft ready. Review, refine, copy, send email, or sync stakeholder follow-ups." : submission.error || "Submission failed."}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.form>
+
+          <div className="space-y-5">
+            {latestMeeting && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Latest meeting report</div>
+                    <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">{latestMeeting.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-zinc-400">{latestMeeting.summary || "Kaarya needs more meeting context before a reliable summary can be created."}</p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-right">
+                    <div className="text-2xl font-semibold text-white">{latestMeeting.readiness_score ?? readiness}</div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">ready score</div>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Actions</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestTasks.length}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Prep questions</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestPrepQuestions.length}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/[0.035] p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Email</div>
+                    <div className={`mt-2 text-xl font-semibold capitalize ${latestEmailLog?.status === "sent" ? "text-emerald-300" : latestEmailLog?.status === "failed" ? "text-rose-300" : "text-zinc-300"}`}>
+                      {latestEmailLog?.status || "not logged"}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Quality</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.quality_score ?? "-"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Productivity</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.productivity_score ?? "-"}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-black/30 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-zinc-500">Preparedness</div>
+                    <div className="mt-2 text-xl font-semibold text-white">{latestMeeting.preparedness_score ?? "-"}</div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {historicalInsights && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Gauge size={17} />
+                  Historical meeting intelligence
+                </div>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <InsightCard icon={BarChart3} label="Meetings" value={historicalInsights.total_meetings} sub="Captured in Kaarya memory." />
+                  <InsightCard icon={ClipboardCheck} label="Open Tasks" value={historicalInsights.open_tasks} sub="Still need follow-through." />
+                  <InsightCard icon={ShieldCheck} label="Avg Readiness" value={`${historicalInsights.average_readiness}%`} sub="Across meeting history." />
+                  <InsightCard icon={Users} label="Loaded Owner" value={historicalInsights.most_loaded_owner} sub="Most assigned action items." />
+                </div>
+                <div className="mt-4 space-y-2">
+                  {historicalInsights.insights?.map((item) => (
+                    <div key={item} className="rounded-lg bg-white/[0.035] p-3 text-sm text-zinc-300">{item}</div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {submission?.structured && (
+              <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Sparkles size={17} />
+                  Review and refine before sending
+                </div>
+                <p className="text-sm leading-6 text-zinc-400">
+                  The output is a draft. Ask Kaarya to make it sharper, more formal, shorter for WhatsApp, split by team, or add missing owners.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button type="button" onClick={() => createDraft("email")} className="rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200 hover:text-white">
+                    Create email draft
+                  </button>
+                  <button type="button" onClick={() => createDraft("prep")} className="rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200 hover:text-white">
+                    Share prep on WhatsApp
+                  </button>
+                  <button type="button" onClick={copyDraft} className="rounded-lg bg-white px-4 py-3 text-sm font-semibold text-black">
+                    Copy draft
+                  </button>
+                  <button type="button" onClick={sendEditedDraft} className="rounded-lg border border-emerald-300/30 bg-emerald-300/10 px-4 py-3 text-sm font-semibold text-emerald-100">
+                    Send email now
+                  </button>
+                  <button type="button" onClick={() => setShareMessage("Saved as a send-later draft. Delivery scheduling will use this draft once Resend/cron is connected.")} className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-zinc-200">
+                    <Clock size={15} /> Send later
+                  </button>
+                </div>
+                {draftText && (
+                  <textarea
+                    value={draftText}
+                    onChange={(event) => setDraftText(event.target.value)}
+                    className="mt-4 min-h-[220px] w-full resize-none rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm leading-6 text-white outline-none focus:border-white/30"
+                  />
+                )}
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    value={refineInstruction}
+                    onChange={(event) => setRefineInstruction(event.target.value)}
+                    className="flex-1 rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-white/30"
+                    placeholder="Ask Kaarya: make this more formal, split by team, add missing prep questions..."
+                  />
+                  <button type="button" onClick={refineOutput} disabled={isRefining} className="rounded-lg bg-white px-5 py-3 text-sm font-semibold text-black disabled:opacity-60">
+                    {isRefining ? "Refining..." : "Refine"}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+              <div className="mb-5 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight text-white">Dashboard source of truth</h2>
+                  <p className="mt-2 text-sm text-zinc-400">Supabase-backed records appear here; demo data is shown until credentials are configured.</p>
+                </div>
+                <BarChart3 className="text-zinc-500" size={22} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {meetings.slice(0, 4).map((meeting) => (
+                  <motion.div key={meeting.id} whileHover={{ y: -2 }} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-white">{meeting.title}</div>
+                      <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] text-zinc-400">{meeting.status}</span>
+                    </div>
+                    <div className="mt-3 text-xs leading-5 text-zinc-500">{meeting.summary || "Waiting for processing summary."}</div>
+                    <div className="mt-4 flex items-center justify-between text-xs text-zinc-400">
+                      <span>{meeting.meeting_date || "-"}</span>
+                      <span>{meeting.readiness_score || readiness}/100 ready</span>
+                    </div>
+                  </motion.div>
+                ))}
+                {!meetings.length && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                    Submit one meeting or use the demo loader to see the dashboard populate.
+                  </div>
+                )}
+              </div>
+              {dashboardError && <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{dashboardError}</div>}
+            </section>
+
+            <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight text-white">Action items</h2>
+                  <p className="mt-2 text-sm text-zinc-400">Less prose, more ownership. This is the format copied to email and synced to Notion.</p>
+                </div>
+                <FileText className="text-zinc-500" size={21} />
+              </div>
+              <TaskTable tasks={(latestTasks.length ? latestTasks : tasks).slice(0, 6)} />
+              {!(latestTasks.length ? latestTasks : tasks).length && (
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                  Action items will appear here after Kaarya processes a meeting. The client demo can be loaded from the intake panel.
+                </div>
+              )}
+              <div className="mt-4 space-y-2">
+                {(latestTasks.length ? latestTasks : tasks).slice(0, 3).map((task) => (
+                  <div key={`share-${task.id}`} className="flex flex-col gap-2 rounded-lg bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm text-zinc-300">{task.owner || "Stakeholder"} nudge</div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => copyTaskNudge(task)} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:text-white">
+                        <Copy size={14} /> Copy
+                      </button>
+                      <button type="button" onClick={() => openWhatsAppNudge(task)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">
+                        WhatsApp
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="grid gap-5 md:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <CalendarPlus size={17} />
+                  Next meeting prep
+                </div>
+                <div className="space-y-3">
+                  {(latestPrepQuestions.length ? latestPrepQuestions : prepQuestions).slice(0, 3).map((item) => (
+                    <div key={item.id} className="rounded-lg bg-white/[0.035] p-3 text-sm leading-6 text-zinc-300">
+                      {item.question}
+                      <div className="mt-2 text-xs text-zinc-500">{item.intended_owner || item.intended_team || "Team"} should answer this before the next call.</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl">
+                <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+                  <Users size={17} />
+                  Follow-up loop
+                </div>
+                <div className="space-y-3 text-sm text-zinc-400">
+                  <div className="flex items-center justify-between rounded-lg bg-white/[0.035] p-3">
+                    <span>Email report</span>
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg bg-white/[0.035] p-3">
+                    <span>Teams and Slack updates</span>
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg bg-white/[0.035] p-3">
+                    <span>Two-day pending task scan</span>
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-white/10 bg-black px-5 py-10">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm text-zinc-500 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <Logo />
+            <span>Kaarya by Static Technologies Private Limited</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Mail size={15} />
+            Clean, copy-pasteable outputs for Word, mail, Notion, Teams, and Slack.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}

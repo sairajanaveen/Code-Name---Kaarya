@@ -1,7 +1,14 @@
 import { config } from "./config";
+import { Buffer } from "buffer";
+import { calculateMeetingScores } from "./scoring";
 
 function enabled() {
   return Boolean(config.supabaseUrl && config.supabaseServiceKey);
+}
+
+function nullableIsoDate(value) {
+  if (typeof value !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -24,6 +31,32 @@ async function supabaseFetch(path, options = {}) {
     throw new Error(message);
   }
   return data;
+}
+
+function isMissingColumnError(error, columnName) {
+  return String(error?.message || "").toLowerCase().includes(columnName.toLowerCase());
+}
+
+async function patchMeetingScores(meetingId, scores) {
+  const remaining = { ...scores };
+  const scoreColumns = Object.keys(scores);
+
+  for (let attempts = 0; attempts <= scoreColumns.length; attempts += 1) {
+    try {
+      const [meeting] = await supabaseFetch(`/rest/v1/meetings?id=eq.${meetingId}`, {
+        method: "PATCH",
+        body: JSON.stringify(remaining)
+      });
+      return meeting;
+    } catch (error) {
+      const missingColumn = scoreColumns.find((column) => remaining[column] !== undefined && isMissingColumnError(error, column));
+      if (!missingColumn) throw error;
+      delete remaining[missingColumn];
+      if (!Object.keys(remaining).length) return null;
+    }
+  }
+
+  return null;
 }
 
 export async function createMeeting(payload, status = "intake_received") {
@@ -59,6 +92,141 @@ export async function listMeetings() {
 
 export async function listTasks() {
   return supabaseFetch("/rest/v1/action_items?select=*&order=due_date.asc&limit=100");
+}
+
+export async function listPrepQuestions() {
+  return supabaseFetch("/rest/v1/prep_questions?select=*&order=created_at.desc&limit=100");
+}
+
+export async function saveStructuredMeetingOutput({ meetingId, structured }) {
+  if (!enabled()) {
+    return { skipped: true };
+  }
+
+  const [meeting] = await supabaseFetch(`/rest/v1/meetings?id=eq.${meetingId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      summary: structured.summary || null,
+      language: structured.language || null,
+      readiness_score: structured.readiness_score ?? null,
+      status: "processed"
+    })
+  });
+
+  const actionItems = structured.action_items.map((item) => ({
+    meeting_id: meetingId,
+    task: item.task,
+    owner: item.owner || null,
+    team: item.team || null,
+    due_date: nullableIsoDate(item.due_date),
+    priority: item.priority || "Medium",
+    status: item.status || "pending",
+    evidence: item.evidence || null,
+    follow_up_count: 0
+  }));
+
+  const prepQuestions = structured.prep_questions.map((item) => ({
+    meeting_id: meetingId,
+    question: item.question,
+    intended_owner: item.intended_owner || null,
+    intended_team: item.intended_team || null,
+    reason: item.reason || null,
+    next_meeting_date: nullableIsoDate(item.next_meeting_date)
+  }));
+
+  const savedActionItems = actionItems.length
+    ? await supabaseFetch("/rest/v1/action_items", {
+      method: "POST",
+      body: JSON.stringify(actionItems)
+    })
+    : [];
+
+  const savedPrepQuestions = prepQuestions.length
+    ? await supabaseFetch("/rest/v1/prep_questions", {
+      method: "POST",
+      body: JSON.stringify(prepQuestions)
+    })
+    : [];
+
+  const scores = calculateMeetingScores({
+    meeting,
+    tasks: savedActionItems,
+    prepQuestions: savedPrepQuestions
+  });
+
+  const scoredMeeting = await patchMeetingScores(meetingId, scores);
+
+  return {
+    meeting: scoredMeeting || meeting,
+    action_items: savedActionItems,
+    prep_questions: savedPrepQuestions,
+    scores
+  };
+}
+
+export async function saveDeliveryLogs({ meetingId, results = {}, payload = {} }) {
+  if (!enabled()) return { skipped: true };
+
+  const rows = Object.entries(results).map(([channel, result]) => ({
+    meeting_id: meetingId,
+    channel,
+    recipient: channel === "email" ? payload.email || null : null,
+    status: result?.ok ? "sent" : result?.skipped ? "skipped" : "failed",
+    error: result?.ok || result?.skipped ? null : `HTTP ${result?.status || "unknown"}`
+  }));
+
+  if (!rows.length) return [];
+  return supabaseFetch("/rest/v1/delivery_logs", {
+    method: "POST",
+    body: JSON.stringify(rows)
+  });
+}
+
+export async function listDeliveryLogs() {
+  return supabaseFetch("/rest/v1/delivery_logs?select=*&order=sent_at.desc&limit=50");
+}
+
+export async function getTaskByUpdateToken(token) {
+  const safeToken = encodeURIComponent(token || "");
+  const data = await supabaseFetch(`/rest/v1/action_items?update_token=eq.${safeToken}&select=*&limit=1`);
+  return data?.[0] || null;
+}
+
+export async function markTaskNudged(token, channel = "whatsapp") {
+  if (!enabled()) return { skipped: true };
+  const safeToken = encodeURIComponent(token || "");
+  const now = new Date().toISOString();
+  try {
+    const [task] = await supabaseFetch(`/rest/v1/action_items?update_token=eq.${safeToken}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        last_nudged_at: now,
+        last_nudge_channel: channel,
+        updated_at: now
+      })
+    });
+    return task;
+  } catch (error) {
+    if (!isMissingColumnError(error, "last_nudged_at") && !isMissingColumnError(error, "last_nudge_channel")) {
+      throw error;
+    }
+    return { skipped: true, reason: "nudge columns missing" };
+  }
+}
+
+export async function updateTaskByToken(token, updates = {}) {
+  const safeToken = encodeURIComponent(token || "");
+  const allowedStatus = ["pending", "in_progress", "blocked", "done"];
+  const status = allowedStatus.includes(updates.status) ? updates.status : "pending";
+  const [task] = await supabaseFetch(`/rest/v1/action_items?update_token=eq.${safeToken}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status,
+      evidence: updates.evidence || null,
+      updated_at: new Date().toISOString()
+    })
+  });
+  return task;
 }
 
 export async function uploadBase64Asset({ fileName, mimeType, base64 }) {
