@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Clock,
-  Cloud,
   Copy,
   Database,
   FileText,
@@ -31,12 +30,19 @@ const ease = [0.16, 1, 0.3, 1];
 
 const pipeline = [
   { key: "input", label: "Input", detail: "Form, Tally, mic, transcript", icon: Mic },
-  { key: "make", label: "Make", detail: "Validation and routing", icon: Network },
+  { key: "make", label: "Intake", detail: "Validation and routing", icon: Network },
   { key: "storage", label: "Storage", detail: "Supabase records and files", icon: Database },
   { key: "ai", label: "AI", detail: "Sarvam plus structured extraction", icon: Sparkles },
   { key: "tasks", label: "Tasks", detail: "Owners, teams, due dates", icon: ClipboardCheck },
   { key: "followup", label: "Follow-up", detail: "Email, dashboard, Teams, Slack", icon: Send }
 ];
+
+const integrationLabels = {
+  make: "intake",
+  supabase: "storage",
+  sarvam: "language",
+  notion: "notion"
+};
 
 const defaultForm = {
   source: "website",
@@ -50,6 +56,23 @@ const defaultForm = {
   audio_url: "",
   attachment_url: "",
   destination_channels: ["email", "dashboard", "notion", "teams", "slack"]
+};
+
+const demoMeeting = {
+  meeting_name: "Client implementation review",
+  meeting_date: new Date().toISOString().split("T")[0],
+  attendees: "Asha - Client Success, Rohan - Product, Priya - Operations, Finance Team",
+  agenda: "Confirm launch blockers, owner commitments, next client meeting readiness",
+  raw_notes: [
+    "Asha confirmed the client is ready for pilot launch if the onboarding checklist is shared today.",
+    "Rohan will fix the dashboard loading state and send a short Loom walkthrough before 5 PM.",
+    "Priya said operations cannot close the setup until vendor GST documents are received.",
+    "Finance team will verify payment terms and send the approved invoice format tomorrow morning.",
+    "Client asked for a single action table instead of a long summary.",
+    "Next meeting should review open blockers, proof of setup, and owner progress before discussing new features."
+  ].join("\n"),
+  email: "client.owner@example.com",
+  language_hint: "English"
 };
 
 function Logo() {
@@ -222,6 +245,7 @@ export default function KaaryaV1() {
   const [deliveryLogs, setDeliveryLogs] = useState([]);
   const [historicalInsights, setHistoricalInsights] = useState(null);
   const [shareMessage, setShareMessage] = useState("");
+  const [dashboardError, setDashboardError] = useState("");
   const [integrations, setIntegrations] = useState({});
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -252,6 +276,8 @@ export default function KaaryaV1() {
   const openTasks = useMemo(() => tasks.filter((task) => task.status !== "done"), [tasks]);
   const noteWordCount = useMemo(() => form.raw_notes.trim().split(/\s+/).filter(Boolean).length, [form.raw_notes]);
   const inputIsWeak = !form.audio_url && !form.attachment_url && noteWordCount > 0 && noteWordCount < 18;
+  const canContinueCapture = Boolean(form.meeting_name.trim() && (noteWordCount >= 18 || form.audio_url || form.attachment_url));
+  const canContinuePeople = Boolean(form.attendees.trim() || form.agenda.trim());
   const readiness = useMemo(() => {
     if (submission?.structured?.readiness_score) return submission.structured.readiness_score;
     if (!tasks.length) return 72;
@@ -260,20 +286,25 @@ export default function KaaryaV1() {
   }, [openTasks.length, submission, tasks]);
 
   async function refreshDashboard() {
-    const [meetingResponse, taskResponse, insightResponse] = await Promise.all([
-      fetch("/api/dashboard/meetings"),
-      fetch("/api/dashboard/tasks"),
-      fetch("/api/dashboard/insights")
-    ]);
-    const meetingData = await meetingResponse.json();
-    const taskData = await taskResponse.json();
-    const insightData = await insightResponse.json();
-    setMeetings(meetingData.meetings || []);
-    setTasks(taskData.tasks || []);
-    setPrepQuestions(taskData.prep_questions || []);
-    setDeliveryLogs(taskData.delivery_logs || []);
-    setHistoricalInsights(insightData.insights || null);
-    setIntegrations(meetingData.integrations || {});
+    try {
+      const [meetingResponse, taskResponse, insightResponse] = await Promise.all([
+        fetch("/api/dashboard/meetings"),
+        fetch("/api/dashboard/tasks"),
+        fetch("/api/dashboard/insights")
+      ]);
+      const meetingData = await meetingResponse.json();
+      const taskData = await taskResponse.json();
+      const insightData = await insightResponse.json();
+      setMeetings(meetingData.meetings || []);
+      setTasks(taskData.tasks || []);
+      setPrepQuestions(taskData.prep_questions || []);
+      setDeliveryLogs(taskData.delivery_logs || []);
+      setHistoricalInsights(insightData.insights || null);
+      setIntegrations(meetingData.integrations || {});
+      setDashboardError("");
+    } catch {
+      setDashboardError("Live dashboard sync is taking longer than expected. Intake still works.");
+    }
   }
 
   function update(key, value) {
@@ -303,6 +334,14 @@ export default function KaaryaV1() {
   }
 
   function goNextStep() {
+    if (intakeStep === 1 && !canContinueCapture) {
+      setShareMessage("Add a meeting name and at least a few useful lines of context before moving ahead.");
+      return;
+    }
+    if (intakeStep === 2 && !canContinuePeople) {
+      setShareMessage("Add at least the people involved or the intended outcome.");
+      return;
+    }
     setIntakeStep((step) => Math.min(3, step + 1));
   }
 
@@ -355,6 +394,18 @@ export default function KaaryaV1() {
     setAudioStatus("Recording...");
     recorder.start();
     setIsRecording(true);
+  }
+
+  function loadDemoMeeting() {
+    setForm((prev) => ({
+      ...prev,
+      ...demoMeeting,
+      destination_channels: prev.destination_channels
+    }));
+    setIntakeStep(1);
+    setSubmission(null);
+    setDraftText("");
+    setShareMessage("Demo meeting loaded. Review it, then continue through the flow.");
   }
 
   async function submitMeeting(event) {
@@ -470,7 +521,7 @@ export default function KaaryaV1() {
       })
     });
     const data = await response.json();
-    setShareMessage(response.ok ? "Email sent directly from Kaarya." : data.error || "Email could not be sent.");
+    setShareMessage(response.ok ? "Email sent directly from Kaarya." : `${data.error || "Email could not be sent."} The draft is still editable and can be copied instantly.`);
     if (response.ok) await refreshDashboard();
   }
 
@@ -529,7 +580,7 @@ export default function KaaryaV1() {
             {["make", "supabase", "sarvam", "notion"].map((key) => (
               <div key={key} className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-zinc-400">
                 <StatusDot active={integrations[key]} />
-                {key}
+                {integrationLabels[key]}
               </div>
             ))}
             <button onClick={startGoogleLogin} className="ml-2 flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black">
@@ -568,6 +619,14 @@ export default function KaaryaV1() {
               >
                 Kaarya captures messy notes, transcripts, and voice input, then converts them into owners, due dates, prep questions, and periodic follow-ups.
               </motion.p>
+              <div className="mt-7 grid gap-3 text-sm text-zinc-300 sm:grid-cols-3">
+                {["Your data stays in your workspace", "Human-review before sending", "Tasks sync to Notion"].map((item) => (
+                  <div key={item} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2">
+                    <ShieldCheck size={15} className="text-emerald-300" />
+                    {item}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <motion.div
@@ -592,7 +651,7 @@ export default function KaaryaV1() {
           <InsightCard icon={Gauge} label="Readiness" value={`${readiness}%`} sub="Based on unresolved owners, blockers, and next-meeting prep risk." />
           <InsightCard icon={Table2} label="Open Tasks" value={openTasks.length} sub="Action items remain visible until owners update progress." />
           <InsightCard icon={MessageSquare} label="Follow-up" value="2 days" sub="Scheduled reminders keep accountability warm without WhatsApp cost." />
-          <InsightCard icon={ShieldCheck} label="Channels" value="5" sub="Dashboard, email, Notion, Teams, and Slack are available in v1." />
+          <InsightCard icon={ShieldCheck} label="Launch Stack" value="Ready" sub="Dashboard, email drafts, Notion tasks, and stakeholder nudges are connected." />
         </section>
 
         <section className="mx-auto grid max-w-7xl gap-5 px-5 pb-20 lg:grid-cols-[0.9fr_1.1fr]">
@@ -604,9 +663,11 @@ export default function KaaryaV1() {
             <div className="mb-7 flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-semibold tracking-tight text-white">Submit meeting signal</h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-400">Paste notes, record voice, or route Tally into Make. Kaarya turns the input into a task-ready operating layer.</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">Paste notes or record voice. Kaarya turns the input into owners, tasks, prep questions, Notion entries, and reviewable emails.</p>
               </div>
-              <Cloud className="mt-1 text-zinc-500" size={22} />
+              <button type="button" onClick={loadDemoMeeting} className="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-zinc-300 hover:text-white">
+                <Sparkles size={14} /> Load demo
+              </button>
             </div>
 
             <div className="mb-6 grid grid-cols-3 gap-2 rounded-lg border border-white/10 bg-white/[0.035] p-1">
@@ -718,6 +779,11 @@ export default function KaaryaV1() {
                 </button>
               )}
             </div>
+            {shareMessage && (
+              <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3 text-sm text-zinc-300">
+                {shareMessage}
+              </div>
+            )}
 
             {intakeStep === 3 && (
               <button
@@ -754,7 +820,7 @@ export default function KaaryaV1() {
                     submission.ok ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-rose-400/25 bg-rose-400/10 text-rose-100"
                   }`}
                 >
-                  {submission.ok ? "Pipeline accepted. Tasks, prep questions, and delivery routes are ready." : submission.error || "Submission failed."}
+                  {submission.ok ? "Draft ready. Review, refine, copy, send email, or sync stakeholder follow-ups." : submission.error || "Submission failed."}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -896,7 +962,13 @@ export default function KaaryaV1() {
                     </div>
                   </motion.div>
                 ))}
+                {!meetings.length && (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                    Submit one meeting or use the demo loader to see the dashboard populate.
+                  </div>
+                )}
               </div>
+              {dashboardError && <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">{dashboardError}</div>}
             </section>
 
             <section className="rounded-lg border border-white/10 bg-black/60 p-5 backdrop-blur-xl md:p-7">
@@ -908,6 +980,11 @@ export default function KaaryaV1() {
                 <FileText className="text-zinc-500" size={21} />
               </div>
               <TaskTable tasks={(latestTasks.length ? latestTasks : tasks).slice(0, 6)} />
+              {!(latestTasks.length ? latestTasks : tasks).length && (
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-zinc-400">
+                  Action items will appear here after Kaarya processes a meeting. The client demo can be loaded from the intake panel.
+                </div>
+              )}
               <div className="mt-4 space-y-2">
                 {(latestTasks.length ? latestTasks : tasks).slice(0, 3).map((task) => (
                   <div key={`share-${task.id}`} className="flex flex-col gap-2 rounded-lg bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -922,7 +999,6 @@ export default function KaaryaV1() {
                     </div>
                   </div>
                 ))}
-                {shareMessage && <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">{shareMessage}</div>}
               </div>
             </section>
 
