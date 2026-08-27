@@ -7,7 +7,7 @@ import { normalizeIntakePayload } from "../lib/intake.js";
 import { extractAccountability, parseJsonContent, geminiSchema, providerFailure } from "../lib/aiPipeline.js";
 import { config, llmSettings } from "../lib/config.js";
 import { requireUser } from "../lib/auth.js";
-import { listMeetings, listTasks, consumeQuota, updateTaskByToken, saveReviewedDraft } from "../lib/supabase.js";
+import { listMeetings, listTasks, consumeQuota, updateTaskByToken, saveReviewedDraft, validTaskToken, getTaskByUpdateToken } from "../lib/supabase.js";
 import { buildPostMeetingEmail, plainTextToHtml, buildMeetingWhatsApp } from "../lib/templates.js";
 import { readDraftResponse } from "../lib/clientFlow.js";
 import { exampleInput, exampleOutput, createExampleReview } from "../lib/exampleMeeting.js";
@@ -123,6 +123,23 @@ test("stakeholder update rejects invalid tokens and status before storage", asyn
   await assert.rejects(updateTaskByToken("bad", {}), /not found/);
   await assert.rejects(updateTaskByToken("a".repeat(36), { status: "deleted", update_note: "" }), /valid status/);
 });
+test("existing and current stakeholder tokens both resolve without accepting arbitrary values", async () => {
+  for (const length of [32, 36]) {
+    const token = "b".repeat(length);
+    assert.equal(validTaskToken(token), true);
+    globalThis.fetch = async (url, options) => {
+      if (options.method === "POST") {
+        assert.equal(JSON.parse(options.body).p_token, token);
+        return json({ status: "done" });
+      }
+      assert.ok(url.includes("update_token=eq." + token));
+      return json([{ status: "pending" }]);
+    };
+    assert.equal((await getTaskByUpdateToken(token)).status, "pending");
+    assert.equal((await updateTaskByToken(token, { status: "done", update_note: "Verified" })).status, "done");
+  }
+  for (const token of ["a".repeat(34), "g".repeat(36), "a".repeat(31), ["b".repeat(32)]]) assert.equal(validTaskToken(token), false);
+});
 test("stale reviewed saves are a conflict, not a silent overwrite", async () => {
   globalThis.fetch = async () => json({ message: "STALE_DRAFT" }, 400);
   await assert.rejects(saveReviewedDraft({ userId, meeting: { id: meetingId }, structured: exampleOutput, actionIds: [], revision: 1, saveId: userId, notes: "notes" }), (error) => error.status === 409);
@@ -163,12 +180,16 @@ test("Gemini receives supported schema while local string limits stay intact", (
   assert.equal(schema.properties.task.maxLength, 260);
   assert.equal(schema.additionalProperties, false);
   assert.equal(geminiSchema(schema).additionalProperties, undefined);
-  assert.deepEqual(geminiSchema({ type: "array", maxItems: 5, items: { type: "integer", minimum: 0, maximum: 100 } }), { type: "ARRAY", maxItems: 5, items: { type: "INTEGER", minimum: 0, maximum: 100 } });
+  assert.deepEqual(geminiSchema({ type: "array", maxItems: 5, items: { type: "integer", minimum: 0, maximum: 100 } }), { type: "ARRAY", items: { type: "INTEGER" } });
 });
 test("provider credentials, model, format and quota failures have safe specific errors", async () => {
   for (const [status, detail, code] of [
     [400, "API key not valid. Please pass a valid API key.", "AI_CREDENTIALS"],
     [400, "Your API key was reported as leaked. Please use another API key.", "AI_CREDENTIALS"],
+    [400, "API key not found.", "AI_CREDENTIALS"],
+    [400, "Enable billing for this project.", "AI_BILLING_REQUIRED"],
+    [400, "User location is not supported.", "AI_REGION_UNAVAILABLE"],
+    [400, "The specified schema produces too many states for serving.", "AI_SCHEMA_COMPLEXITY"],
     [401, "secret-token must not be returned", "AI_CREDENTIALS"],
     [404, "model missing", "AI_MODEL_UNAVAILABLE"],
     [400, "unsupported schema contains private text", "AI_REQUEST_REJECTED"],
@@ -181,8 +202,9 @@ test("provider credentials, model, format and quota failures have safe specific 
   }
 });
 test("provider diagnostics retain only known request field names", async () => {
-  const error = await providerFailure(json({ error: { message: "Unknown response_json_schema. Private meeting and secret-key must not be logged." } }, 400));
+  const error = await providerFailure(json({ error: { status: "INVALID_ARGUMENT", message: "Unknown response_json_schema. Private meeting and secret-key must not be logged." } }, 400));
   assert.deepEqual(error.requestFields, ["responseJsonSchema"]);
+  assert.equal(error.providerStatus, "INVALID_ARGUMENT");
   assert.ok(!JSON.stringify(error).includes("secret-key"));
 });
 
