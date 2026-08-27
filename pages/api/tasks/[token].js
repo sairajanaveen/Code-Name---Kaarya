@@ -5,16 +5,20 @@ export default async function handler(req, res) {
 
   if (!token) return res.status(400).json({ error: "Task token is required" });
 
-  if (req.method === "GET") {
-    const task = await getTaskByUpdateToken(token);
-    if (!task) return res.status(404).json({ error: "Task not found" });
-    return res.status(200).json({ task });
-  }
+  try {
+    if (req.method === "GET") {
+      const task = await getTaskByUpdateToken(token);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      return res.status(200).json({ task });
+    }
 
-  if (req.method === "PATCH") {
-    const task = await updateTaskByToken(token, req.body || {});
-    if (!task) return res.status(404).json({ error: "Task not found" });
-    return res.status(200).json({ task });
+    if (req.method === "PATCH") {
+      const task = await updateTaskByToken(token, req.body || {});
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      return res.status(200).json({ task });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Could not update task" });
   }
 
   res.setHeader("Allow", "GET, PATCH");
