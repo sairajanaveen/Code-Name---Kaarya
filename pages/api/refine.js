@@ -1,5 +1,13 @@
-import { config } from "../../lib/config";
+import { config as appConfig } from "../../lib/config";
 import { validateStructuredOutput } from "../../lib/validate";
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "4mb"
+    }
+  }
+};
 
 function parseJsonContent(content) {
   const text = String(content || "{}").trim();
@@ -12,8 +20,15 @@ function parseJsonContent(content) {
 }
 
 async function refineWithGemini({ instruction, structured }) {
-  const model = config.llmModel || "gemini-2.5-flash";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.llmApiKey}`, {
+  if (!appConfig.llmApiKey) {
+    return validateStructuredOutput({
+      ...structured,
+      summary: `${structured.summary || "Meeting output refined."} ${instruction}`.trim()
+    });
+  }
+
+  const model = appConfig.llmModel || "gemini-2.5-flash";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${appConfig.llmApiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -35,12 +50,19 @@ async function refineWithGemini({ instruction, structured }) {
 }
 
 async function refineWithOpenAI({ instruction, structured }) {
-  const apiKey = config.openaiApiKey || config.llmApiKey;
+  const apiKey = appConfig.openaiApiKey || appConfig.llmApiKey;
+  if (!apiKey) {
+    return validateStructuredOutput({
+      ...structured,
+      summary: `${structured.summary || "Meeting output refined."} ${instruction}`.trim()
+    });
+  }
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: config.validatorModel,
+      model: appConfig.validatorModel,
       temperature: 0.15,
       response_format: { type: "json_object" },
       messages: [
@@ -64,7 +86,8 @@ export default async function handler(req, res) {
   if (!instruction.trim()) return res.status(400).json({ error: "Instruction is required" });
 
   try {
-    const refined = provider === "openai" && (config.openaiApiKey || config.llmApiKey)
+    const useOpenAI = provider === "openai" || (!appConfig.llmApiKey && appConfig.openaiApiKey);
+    const refined = useOpenAI
       ? await refineWithOpenAI({ instruction, structured })
       : await refineWithGemini({ instruction, structured });
     return res.status(200).json({ structured: refined });
