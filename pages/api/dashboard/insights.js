@@ -7,16 +7,24 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const [meetings, tasks] = await Promise.all([listMeetings(), listTasks()]);
-  if (meetings?.skipped || tasks?.skipped) {
+  try {
+    const [meetings, tasks] = await Promise.all([listMeetings(), listTasks()]);
+    if (meetings?.skipped || tasks?.skipped) {
+      return res.status(200).json({
+        insights: buildHistoricalInsights({ meetings: [], tasks: [] }),
+        demo: true
+      });
+    }
+
+    return res.status(200).json({
+      insights: buildHistoricalInsights({ meetings, tasks }),
+      demo: false
+    });
+  } catch (error) {
     return res.status(200).json({
       insights: buildHistoricalInsights({ meetings: [], tasks: [] }),
-      demo: true
+      demo: true,
+      warning: error.message
     });
   }
-
-  return res.status(200).json({
-    insights: buildHistoricalInsights({ meetings, tasks }),
-    demo: false
-  });
 }
