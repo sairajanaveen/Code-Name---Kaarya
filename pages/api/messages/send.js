@@ -11,13 +11,23 @@ export default async function handler(req, res) {
   if (!to || !String(to).includes("@")) return res.status(400).json({ error: "Valid recipient email is required" });
   if (!String(text).trim()) return res.status(400).json({ error: "Email body is required" });
 
-  const result = await sendDirectEmail({ to, subject, text });
+  let result;
+  try {
+    result = await sendDirectEmail({ to, subject, text });
+  } catch (error) {
+    return res.status(502).json({ error: error.message || "Email provider failed" });
+  }
+
   if (meeting_id) {
-    await saveDeliveryLogs({
-      meetingId: meeting_id,
-      results: { email: result },
-      payload: { email: to }
-    });
+    try {
+      await saveDeliveryLogs({
+        meetingId: meeting_id,
+        results: { email: result },
+        payload: { email: to }
+      });
+    } catch {
+      // Email delivery should not be reported as failed only because logging failed.
+    }
   }
 
   if (!result.ok) {
