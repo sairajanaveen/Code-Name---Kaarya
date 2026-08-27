@@ -1,4 +1,4 @@
-import { getTaskByUpdateToken, updateTaskByToken } from "../../../lib/supabase.js";
+import { getTaskByUpdateToken, updateTaskByToken, validTaskToken } from "../../../lib/supabase.js";
 import { consumeQuota } from "../../../lib/supabase.js";
 import { sendError } from "../../../lib/http.js";
 
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "PATCH") {
-      if (typeof token !== "string" || !/^[a-f0-9]{36}$/.test(token)) return res.status(404).json({ error: "Task not found" });
+      if (!validTaskToken(token)) return res.status(404).json({ error: "Task not found" });
       await consumeQuota(token, "task-update", 30);
       const task = await updateTaskByToken(token, req.body || {});
       if (!task) return res.status(404).json({ error: "Task not found" });
