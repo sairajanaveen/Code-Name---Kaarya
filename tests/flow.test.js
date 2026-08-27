@@ -59,7 +59,7 @@ for (const [name, quote] of [
 
 test("happy path uses a single provider call and a schema", async () => {
   let count = 0;
-  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseJsonSchema.additionalProperties, false); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(exampleOutput) }] } }] }); };
+  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseSchema.type, "OBJECT"); assert.equal(body.generationConfig.responseJsonSchema, undefined); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(exampleOutput) }] } }] }); };
   const events = []; const data = await extractAccountability({ payload: exampleInput, onStage: (stage) => events.push(stage) });
   assert.equal(count, 1); assert.equal(data.structured.action_items.length, 3); assert.deepEqual(events, ["extracting", "checking"]);
 });
@@ -159,13 +159,16 @@ test("explicit AI configuration takes precedence and normalizes provider/model",
 });
 test("Gemini receives supported schema while local string limits stay intact", () => {
   const schema = { type: "object", properties: { task: { type: "string", minLength: 1, maxLength: 260 } }, required: ["task"], additionalProperties: false };
-  assert.deepEqual(geminiSchema(schema).properties.task, { type: "string" });
+  assert.deepEqual(geminiSchema(schema).properties.task, { type: "STRING" });
   assert.equal(schema.properties.task.maxLength, 260);
-  assert.equal(geminiSchema(schema).additionalProperties, false);
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(geminiSchema(schema).additionalProperties, undefined);
+  assert.deepEqual(geminiSchema({ type: "array", maxItems: 5, items: { type: "integer", minimum: 0, maximum: 100 } }), { type: "ARRAY", maxItems: 5, items: { type: "INTEGER", minimum: 0, maximum: 100 } });
 });
 test("provider credentials, model, format and quota failures have safe specific errors", async () => {
   for (const [status, detail, code] of [
     [400, "API key not valid. Please pass a valid API key.", "AI_CREDENTIALS"],
+    [400, "Your API key was reported as leaked. Please use another API key.", "AI_CREDENTIALS"],
     [401, "secret-token must not be returned", "AI_CREDENTIALS"],
     [404, "model missing", "AI_MODEL_UNAVAILABLE"],
     [400, "unsupported schema contains private text", "AI_REQUEST_REJECTED"],
@@ -176,6 +179,11 @@ test("provider credentials, model, format and quota failures have safe specific 
     assert.ok(!error.message.includes("secret-token"));
     assert.ok(!error.message.includes("private text"));
   }
+});
+test("provider diagnostics retain only known request field names", async () => {
+  const error = await providerFailure(json({ error: { message: "Unknown response_json_schema. Private meeting and secret-key must not be logged." } }, 400));
+  assert.deepEqual(error.requestFields, ["responseJsonSchema"]);
+  assert.ok(!JSON.stringify(error).includes("secret-key"));
 });
 
 test("example opens a complete editable review without authentication or network", () => {
