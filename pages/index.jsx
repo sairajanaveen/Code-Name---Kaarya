@@ -100,6 +100,17 @@ function Field({ label, children }) {
 
 const inputClass = "w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:border-white/30 focus:bg-black/70";
 
+function submissionMessage(submission) {
+  if (!submission) return "";
+  if (submission.ok) return "Draft ready. Review, refine, copy, send email, or sync stakeholder follow-ups.";
+  if (Array.isArray(submission.errors) && submission.errors.length) {
+    return submission.errors
+      .map((error) => String(error).replaceAll("_", " "))
+      .join(". ");
+  }
+  return submission.error || "Submission failed. Please check the required fields and try again.";
+}
+
 function FlowMap({ activeIndex }) {
   return (
     <div className="grid gap-3 md:grid-cols-6">
@@ -820,7 +831,7 @@ export default function KaaryaV1() {
                     submission.ok ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100" : "border-rose-400/25 bg-rose-400/10 text-rose-100"
                   }`}
                 >
-                  {submission.ok ? "Draft ready. Review, refine, copy, send email, or sync stakeholder follow-ups." : submission.error || "Submission failed."}
+                  {submissionMessage(submission)}
                 </motion.div>
               )}
             </AnimatePresence>
