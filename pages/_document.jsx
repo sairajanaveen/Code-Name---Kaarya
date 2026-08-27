@@ -5,7 +5,6 @@ export default function Document() {
     <Html lang="en">
       <Head>
         <meta name="theme-color" content="#050505" />
-        <script src="https://cdn.tailwindcss.com"></script>
       </Head>
       <body className="bg-black">
         <Main />

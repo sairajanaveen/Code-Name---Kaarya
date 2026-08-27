@@ -1,35 +1,40 @@
 # Kaarya
 
-Kaarya turns meeting conversations into accountable execution: intake from website or Tally, Supabase as the source of truth, Sarvam AI for Indian-language handling, structured action extraction, and delivery through dashboard, direct email, Notion, Teams, and Slack. Make remains optional for extra automation, but Kaarya can now send email directly from its own backend.
+Kaarya turns meeting notes into reviewed actions: capture, review, then share. Supabase stores private meeting history, Gemini extracts structured drafts, OpenAI is an optional fallback, and Resend sends approved email directly.
+
+**Before deploying this release, follow [Focus Flow Release](docs/focus-flow-release.md). It includes a required database migration and the live acceptance checklist.**
 
 ## Local Setup
 
 ```bash
-npm install
-npm run dev
+pnpm install --frozen-lockfile
+pnpm test
+pnpm dev
 ```
 
-Copy `.env.example` to `.env.local` and fill the services you want enabled. The app runs with demo dashboard data when credentials are missing.
+Configure `.env.local` using the variable names in `.env.example`; never commit real secrets. Without credentials, only the explicitly labelled example can be explored. Missing services never return fabricated meeting data or successful deliveries.
 
 ## Required Production Setup
 
-1. Run `supabase/schema.sql` in Supabase SQL editor.
-2. Create the `meeting-assets` Supabase Storage bucket.
-3. Add a Make custom webhook URL as `MAKE_WEBHOOK_URL` only if you want optional Make automation.
-4. Add `SARVAM_API_KEY` for Indian-language speech, translation, and transliteration.
-5. Add `GEMINI_API_KEY`, `STRUCTURED_LLM_PROVIDER=gemini`, and `STRUCTURED_LLM_MODEL=gemini-2.5-flash` for strict action item extraction.
-6. Add `RESEND_API_KEY` and `EMAIL_FROM` for direct Kaarya email delivery.
-7. Add Notion, Teams, and Slack credentials as needed.
-8. Configure the Make scenarios in `docs/make-scenarios.md` only for optional workflows.
+1. For a new project, run `supabase/schema.sql`. For both new and existing projects, run the complete contents of `supabase/upgrade-focus-flow.sql` before deploying the new app.
+2. Configure Supabase Google OAuth and the production redirect URL; configure the Supabase URL, publishable/anon key and server-only service-role key.
+3. Configure the chosen primary AI provider and optional OpenAI fallback. Sarvam is used for short voice-note transcription, not an extra translation call on every text input.
+4. Configure Resend and a verified sender domain. Email acceptance is not proof of inbox delivery.
+5. Configure optional Notion, Teams and Slack destinations. These are deployment-level connections, not per-customer OAuth connections.
+6. Test the live acceptance checklist with two separate test accounts before inviting clients.
 
 ## Main Routes
 
-- `POST /api/meetings/submit`: validates website intake, stores the meeting, optionally triggers Make, runs structured extraction, and publishes configured channels.
-- `POST /api/audio/upload`: accepts browser microphone audio as base64 JSON and stores it in Supabase Storage.
-- `GET /api/dashboard/meetings`: returns meeting records or demo data.
-- `GET /api/dashboard/tasks`: returns action items and meeting prep questions or demo data.
-- `POST /api/messages/send`: sends an edited email draft directly through Kaarya.
+- `POST /api/meetings/submit`: authenticated, rate-limited extraction; streams progress and returns an unsent, unsaved draft.
+- `POST /api/refine`: applies an explicit correction with the original source and current draft.
+- `POST /api/meetings/save`: atomically stores reviewed output, stable task links and a revision number.
+- `POST /api/audio/transcribe`: authenticated transcription of a consented voice note, up to 30 seconds.
+- `GET /api/dashboard/meetings`: recent meetings belonging to the signed-in user.
+- `GET /api/dashboard/tasks?meeting_id=...`: current tasks and revision of an owned meeting.
+- `POST /api/messages/send`: sends or schedules an approved email through Resend.
+- `POST /api/meetings/publish`: explicitly publishes the saved review to a configured destination.
+- `GET/PATCH /api/tasks/[token]`: limited stakeholder task access via an unguessable update link.
 
 ## V1 Product Rule
 
-The dashboard is the source of truth. Notion, email, Teams, and Slack are delivery and collaboration surfaces.
+Supabase is the source of truth. A generated draft is not a saved meeting, a copied message is not a sent nudge, and a provider accepting email is not proof that it reached the inbox. Notion changes do not currently sync back automatically; stakeholder update links update Kaarya directly.

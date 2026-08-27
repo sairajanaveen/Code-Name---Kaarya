@@ -1,7 +1,9 @@
-import { getTaskByUpdateToken, markTaskNudged } from "../../../../lib/supabase";
+import { getTaskByUpdateToken } from "../../../../lib/supabase";
+import { config } from "../../../../lib/config.js";
 import { buildWhatsAppShareUrl, buildWhatsAppTaskNudge } from "../../../../lib/templates";
 
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
   const { token } = req.query;
 
   if (req.method !== "GET") {
@@ -17,14 +19,9 @@ export default async function handler(req, res) {
   }
   if (!task) return res.status(404).json({ error: "Task not found" });
 
-  const host = req.headers.host ? `https://${req.headers.host}` : "";
+  const host = config.appBaseUrl;
   const updateUrl = `${host}/task/${token}`;
   const whatsappText = buildWhatsAppTaskNudge({ task, updateUrl });
-  try {
-    await markTaskNudged(token, "whatsapp");
-  } catch {
-    // The share link is still useful even if nudge telemetry cannot be saved.
-  }
 
   return res.status(200).json({
     task,
