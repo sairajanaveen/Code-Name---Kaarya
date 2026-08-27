@@ -9,13 +9,22 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const task = await getTaskByUpdateToken(token);
+  let task;
+  try {
+    task = await getTaskByUpdateToken(token);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || "Could not load task" });
+  }
   if (!task) return res.status(404).json({ error: "Task not found" });
 
   const host = req.headers.host ? `https://${req.headers.host}` : "";
   const updateUrl = `${host}/task/${token}`;
   const whatsappText = buildWhatsAppTaskNudge({ task, updateUrl });
-  await markTaskNudged(token, "whatsapp");
+  try {
+    await markTaskNudged(token, "whatsapp");
+  } catch {
+    // The share link is still useful even if nudge telemetry cannot be saved.
+  }
 
   return res.status(200).json({
     task,
