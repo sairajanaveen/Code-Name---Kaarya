@@ -12,7 +12,8 @@ export default function handler(req, res) {
 
   return res.status(missing.length ? 207 : 200).json({
     ok: missing.length === 0,
-    status: missing.length ? "degraded" : "ready",
+    status: missing.length ? "configuration_missing" : "configuration_present",
+    checks: "Configuration only; does not verify schema, provider quotas, OAuth or inbox delivery.",
     missing,
     integrations,
     checked_at: new Date().toISOString()

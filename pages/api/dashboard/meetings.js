@@ -1,26 +1,10 @@
-import { integrationStatus } from "../../../lib/config";
-import { sampleMeetings } from "../../../lib/mockData";
-import { listMeetings } from "../../../lib/supabase";
-
+import { integrationStatus } from "../../../lib/config.js";
+import { requireUser } from "../../../lib/auth.js";
+import { listMeetings } from "../../../lib/supabase.js";
+import { sendError } from "../../../lib/http.js";
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  try {
-    const data = await listMeetings();
-    return res.status(200).json({
-      meetings: data?.skipped ? sampleMeetings : data,
-      integrations: integrationStatus(),
-      demo: Boolean(data?.skipped)
-    });
-  } catch (error) {
-    return res.status(200).json({
-      meetings: sampleMeetings,
-      integrations: integrationStatus(),
-      demo: true,
-      warning: error.message
-    });
-  }
+  res.setHeader("Cache-Control", "no-store");
+  if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).end(); }
+  try { const user = await requireUser(req); const meetings = await listMeetings(user.id); return res.status(200).json({ meetings: meetings?.skipped ? [] : meetings, integrations: integrationStatus() }); }
+  catch(error) { return sendError(res, error); }
 }

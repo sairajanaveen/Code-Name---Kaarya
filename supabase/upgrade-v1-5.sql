@@ -37,6 +37,8 @@ alter table action_items add column if not exists organization_id uuid reference
 alter table action_items add column if not exists update_token text unique default encode(gen_random_bytes(18), 'hex');
 alter table action_items add column if not exists stakeholder_email text;
 alter table action_items add column if not exists notion_page_id text;
+alter table action_items add column if not exists last_nudged_at timestamptz;
+alter table action_items add column if not exists last_nudge_channel text;
 
 alter table prep_questions add column if not exists organization_id uuid references organizations(id) on delete set null;
 alter table delivery_logs add column if not exists organization_id uuid references organizations(id) on delete set null;

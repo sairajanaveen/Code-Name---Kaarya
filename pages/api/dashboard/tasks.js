@@ -1,26 +1,18 @@
-import { samplePrepQuestions, sampleTasks } from "../../../lib/mockData";
-import { listDeliveryLogs, listPrepQuestions, listTasks } from "../../../lib/supabase";
-
+import { requireUser } from "../../../lib/auth.js";
+import { listTasks, listPrepQuestions, listDeliveryLogs, getOwnedMeeting } from "../../../lib/supabase.js";
+import { sendError } from "../../../lib/http.js";
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
+  res.setHeader("Cache-Control", "no-store");
+  if (req.method !== "GET") { res.setHeader("Allow", "GET"); return res.status(405).end(); }
   try {
-    const [data, prepData, deliveryData] = await Promise.all([listTasks(), listPrepQuestions(), listDeliveryLogs()]);
-    return res.status(200).json({
-      tasks: data?.skipped ? sampleTasks : data,
-      prep_questions: prepData?.skipped ? samplePrepQuestions : prepData,
-      delivery_logs: deliveryData?.skipped ? [] : deliveryData,
-      demo: Boolean(data?.skipped)
-    });
-  } catch (error) {
-    return res.status(200).json({
-      tasks: sampleTasks,
-      prep_questions: samplePrepQuestions,
-      demo: true,
-      warning: error.message
-    });
+    const user = await requireUser(req);
+    if (req.query?.meeting_id) {
+      const meeting = await getOwnedMeeting(req.query.meeting_id, user.id);
+      const tasks = await listTasks(user.id, meeting.id);
+      return res.status(200).json({ meeting, tasks });
+    }
+    const [tasks, prep, logs] = await Promise.all([listTasks(user.id), listPrepQuestions(user.id), listDeliveryLogs(user.id)]);
+    return res.status(200).json({ tasks: tasks?.skipped ? [] : tasks, prep_questions: prep?.skipped ? [] : prep, delivery_logs: logs?.skipped ? [] : logs });
   }
+  catch(error) { return sendError(res, error); }
 }

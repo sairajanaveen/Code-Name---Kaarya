@@ -2,38 +2,38 @@ import { ShieldCheck } from "lucide-react";
 
 const items = [
   {
-    title: "Tenant-isolated workspace design",
-    body: "Kaarya is being structured around organizations, members, and row-level access controls so each customer only sees their own meeting data."
+    title: "Private meeting history",
+    body: "Meeting history requests require a verified Supabase sign-in and are filtered to the meeting creator. Team-wide sharing and enterprise access controls are not included in this release."
   },
   {
-    title: "Backend-only service credentials",
-    body: "Sensitive service keys are stored in deployment environment variables and are never exposed in browser code or public repositories."
+    title: "Processing and storage",
+    body: "Notes are sent to the configured AI provider to create a draft. Gemini may fall back to OpenAI. Voice notes are sent to Sarvam for transcription. Saving a review stores the source notes and output in Supabase. These services process data under their own terms."
   },
   {
     title: "User-controlled sharing",
-    body: "Stakeholder nudges are drafted for review. Teams can copy, share, or send updates deliberately instead of allowing uncontrolled automatic spam."
+    body: "Generating a draft does not send email or publish to connected channels. You review and approve sharing. Anyone with a task update link can view and update that task; only share links with the intended stakeholder."
   },
   {
-    title: "Human-readable outputs",
-    body: "Emails, WhatsApp nudges, and summaries are professional, clean, and free from AI watermark language."
+    title: "Review for accuracy",
+    body: "Source quotes are checked before generated actions appear. This is not a guarantee that every interpretation is correct. Review commitments, names, dates and recipients before sharing."
   },
   {
-    title: "Deletion and retention ready",
-    body: "The data model supports meeting-level ownership so retention controls, exports, and deletion workflows can be added cleanly as customers mature."
+    title: "Current limits",
+    body: "Self-service data deletion, configurable retention, task-link expiry and compliance certifications are not available yet. Contact your workspace operator for deletion. Avoid regulated or highly sensitive information until your organization has approved this deployment."
   }
 ];
 
 export default function SecurityPage() {
   return (
     <main className="min-h-screen bg-[#050505] px-5 py-12 text-white">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'); body { font-family: Inter, system-ui, sans-serif; background: #050505; }`}</style>
       <section className="mx-auto max-w-4xl">
         <div className="mb-8 flex h-12 w-12 items-center justify-center rounded-lg bg-white text-black">
           <ShieldCheck size={24} />
         </div>
-        <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">Security and data trust</h1>
+        <a href="/" className="mb-6 inline-block text-sm text-emerald-200">Back to Kaarya</a>
+        <h1 className="text-3xl font-semibold">Privacy and data handling</h1>
         <p className="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
-          Kaarya is built for teams that discuss sensitive execution, finance, HR, client, and program data. The product design keeps customer control, isolation, and auditability at the center.
+          Understand what is stored, which services process your notes, and what you control before using this workspace.
         </p>
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           {items.map((item) => (

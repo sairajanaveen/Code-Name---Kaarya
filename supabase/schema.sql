@@ -70,6 +70,8 @@ create table if not exists action_items (
   update_token text unique default encode(gen_random_bytes(18), 'hex'),
   stakeholder_email text,
   notion_page_id text,
+  last_nudged_at timestamptz,
+  last_nudge_channel text,
   follow_up_count integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
