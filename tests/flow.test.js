@@ -4,8 +4,8 @@ import { EventEmitter } from "node:events";
 import { assessNotes, validateMeetingPayload, validDate, validEmail, MAX_TRANSCRIPT_LENGTH } from "../lib/meetingInput.js";
 import { validateStructuredOutput, groundOutput } from "../lib/validate.js";
 import { normalizeIntakePayload } from "../lib/intake.js";
-import { extractAccountability, parseJsonContent } from "../lib/aiPipeline.js";
-import { config } from "../lib/config.js";
+import { extractAccountability, parseJsonContent, geminiSchema, providerFailure } from "../lib/aiPipeline.js";
+import { config, llmSettings } from "../lib/config.js";
 import { requireUser } from "../lib/auth.js";
 import { listMeetings, listTasks, consumeQuota, updateTaskByToken, saveReviewedDraft } from "../lib/supabase.js";
 import { buildPostMeetingEmail, plainTextToHtml, buildMeetingWhatsApp } from "../lib/templates.js";
@@ -149,6 +149,33 @@ test("Notion transport failure is reported as a failed item", async () => {
   globalThis.fetch = async () => { throw new Error("offline"); };
   const result = await publishToNotion({ meeting: { title: "Review" }, structured: { ...exampleOutput, action_items: [exampleOutput.action_items[0]] } });
   assert.equal(result.created[0].ok, false); assert.equal(result.created[0].status, 502);
+});
+
+test("explicit AI configuration takes precedence and normalizes provider/model", () => {
+  const settings = llmSettings({ STRUCTURED_LLM_PROVIDER: " Gemini ", STRUCTURED_LLM_MODEL: "models/gemini-2.5-flash ", STRUCTURED_LLM_API_KEY: " configured ", GEMINI_API_KEY: "other" });
+  assert.equal(settings.llmProvider, "gemini");
+  assert.equal(settings.llmModel, "gemini-2.5-flash");
+  assert.equal(settings.llmApiKey, "configured");
+});
+test("Gemini receives supported schema while local string limits stay intact", () => {
+  const schema = { type: "object", properties: { task: { type: "string", minLength: 1, maxLength: 260 } }, required: ["task"], additionalProperties: false };
+  assert.deepEqual(geminiSchema(schema).properties.task, { type: "string" });
+  assert.equal(schema.properties.task.maxLength, 260);
+  assert.equal(geminiSchema(schema).additionalProperties, false);
+});
+test("provider credentials, model, format and quota failures have safe specific errors", async () => {
+  for (const [status, detail, code] of [
+    [400, "API key not valid. Please pass a valid API key.", "AI_CREDENTIALS"],
+    [401, "secret-token must not be returned", "AI_CREDENTIALS"],
+    [404, "model missing", "AI_MODEL_UNAVAILABLE"],
+    [400, "unsupported schema contains private text", "AI_REQUEST_REJECTED"],
+    [429, "quota", "AI_QUOTA"]
+  ]) {
+    const error = await providerFailure(json({ error: { message: detail } }, status));
+    assert.equal(error.code, code);
+    assert.ok(!error.message.includes("secret-token"));
+    assert.ok(!error.message.includes("private text"));
+  }
 });
 
 test("example opens a complete editable review without authentication or network", () => {
