@@ -39,6 +39,8 @@ Configure `.env.local` using the variable names in `.env.example`; never commit 
 
 ## V1 Product Rule
 
+VTT/SRT imports are parsed before AI extraction. The model and source-quote validator use the same caption text, with timestamps/markup removed and speaker attribution retained. Original notes remain unchanged in private storage. Malformed/partial captions and weak caption content fail before an AI call; failed extraction releases the meeting reservation. This patch needs no new environment variables or database migration.
+
 Supabase is the source of truth. A generated draft is retained privately but is not an approved review. A copied message is not a sent nudge; provider acceptance is not inbox delivery. Notion changes do not currently sync back automatically. Stakeholder links update Kaarya directly.
 
 Free: one successful generation per India-calendar day, five retained meetings, 20,000 input characters, one refinement per meeting and per day. Pro is priced at INR 2,999/month; Team at INR 9,999/month. Checkout is disabled pending Razorpay integration and payment acceptance testing. No browser setting can grant a paid plan.
