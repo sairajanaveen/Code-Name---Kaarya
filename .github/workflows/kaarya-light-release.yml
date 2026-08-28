@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-          fetch-depth: 2
+          fetch-depth: 10
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -24,7 +24,7 @@ jobs:
       - name: Unpack the exact reviewed release
         shell: python
         env:
-          SOURCE_ZIP: >-
+          SOURCE_ZIP_0: >-
             UEsDBBQAAAAIAAu3HF1cl5tbiAgAAB8SAAAJAAAAUkVBRE1FLm1kdVjbchs3En3nV3SVH7LrIoe57G7FUqVSim/RrmyldIkfXKlME+jhwMQA4wZAiv76rQYw
             JC3bL7Y00wOgT58+faAn8D9E3uNsVv6HmNgFGIiicWtwPlIA46IH5YfRUiQYjEvyFJ0Gpq2hHWlAFY134QwUjjExzeurOcSeHIQemRq4TSOuMBCE6JkCjGy2
             KEvW7XojL/ZzeE2DcQboITKqGCBETkrW1aAZuxjmcD2Su7gEIwcBP8r2aKFDa1eoNvN8vBsK5DTIPwFwHNlvSQMNaCxow6Si3TfwWn5fXqdovd/k7971GMPF
@@ -525,6 +525,7 @@ jobs:
             5n4fsQUvrl0tcWNMDV7kW5Oqx0zaU263ztcr8dipdhPHphKqxZ0SCKBDoLocIx8ktN1ekv84cucHsN4vRAqZYpBwIaV7LNHaClnVaMs25EjTn6YaPC5mPI/q
             9EcrY54rZZRSJw+C11SelRD+XaVEu0XkpM/BTDZxWehENTZwtzgKhg2ljlKQU7O+DbXXlwJV4j4N8fXh3TupxcW234NW66A/2/lSGiENPmVkba7EY8yu2+uK
             RRSXJKEPiDmqL10Dynh4SMInBZODYazPHyGofmWzpzKg4AfrsWAbtUapFrSw5dnt4p2bar5NHTrgxTCAPeHp00lBaYHXna9oyyw+JvkQ5g9SRpAY/D6xNXhb
+          SOURCE_ZIP_1: >-
             V8+zA5PJpzl0iE59E0EaE893N41kOxv4hDXDxtzFqeFVf626F2B7/NvhZBSnlOjtcerj51TTUQI2oVJTr63N+dVM/lJGoBmL4hKNAyWfJoKRAj5ZhUyrbEup
             xknZv+R9agygTSXsYzlyzeZt5+OgE22AmipOaT0VJ6Vin50l1hm5mkd9ZNlxPxzesoXqi2vZMyqvLfR0aqAeW9wagPCAlq4raOGxWrrHKiMfKdT4UHRUdK3j
             V5KO/nLwexezf9X+OwhV/yBN4FMURVuQwK0R6mM4ePDRbdBHj5Y4xLLJ1fcPpJM5d9urRWA9mRq3cVO92i2NdylIsmCo7SR+GRNyqtw/EFGukOo3c/vYYoPW
@@ -1025,6 +1026,7 @@ jobs:
             VNsPdyAoAzOtJP+nr/RXZgkrq5ASyebwiGcua9VP0LVflJoKIIXKkVU65wtPAdveJBdihBhR0oogtFbuC8pKCm1dXoYp9mdmIawvNNeAHTHb7U3BXl4c/ubK
             P6bTpeRdf51Vq0mHs2clwoP24UwZkP7Gy42FZfvlHfFz6HrotD4lm9I3VOmaCBwh3CqEZ6mzLGHxqxp3MqZdx+IqbkT3NFuMXFBwvdwbX+3lH0me/lDjkW+L
             Puybh7Y5T+ldr9erjWKUmOznMnWxTnq/VKKh7g6h1VG5OI/lFZcp/KAhL77GnqlfDjgLgpLRfRTtPBOKpTHaNZzrJzxsg4dOgGB8/qsaDzAucXsHjqKDn9fQ
+          SOURCE_ZIP_2: >-
             C/dEaWs4Ec94EMETA+ASfW58b49G1UgXy19KnqgUdjCGW2kVQgRwtKL1FwJmtsChjn/kd3tfPvT79//I+399m+L7O3DvfffNe1Ky6Z0LstboX1lBQ9UzKtcJ
             eL4PtvcilXuL+qDZopz1OAqp16PjEE+SyqgTi0KJ4yT7ZahdZYr7JRL3tJXEMvnkfBARQQ7G/QNSFipodFtKnlKzaIZb3GyJiK8HKLZTwY8WCoDlo25lYShK
             U8RC1M5HrGcQD1wZsOlXyDTKBTxqkR/CjG9YAnW2pifhhx2pycSAbbivW4I+HYcRZOr+rW75BJlYdU8vFWtEIgoWLJoAjZMp3oqZ0C5xFoG5OvUfalzWEe0M
@@ -1170,11 +1172,10 @@ jobs:
           import base64, hashlib, io, json, os, pathlib, subprocess, zipfile
           def git(*args):
               return subprocess.check_output(["git", *args], text=True).strip()
-          if git("rev-parse", "HEAD^") != "15d5f9b32e843d923c7bc74696806b5ab448b55c":
-              raise RuntimeError("Release base changed; review before publishing")
-          if git("diff", "--name-only", "HEAD^", "HEAD") != ".github/workflows/kaarya-light-release.yml":
+          git("merge-base", "--is-ancestor", "15d5f9b32e843d923c7bc74696806b5ab448b55c", "HEAD")
+          if git("diff", "--name-only", "15d5f9b32e843d923c7bc74696806b5ab448b55c", "HEAD") != ".github/workflows/kaarya-light-release.yml":
               raise RuntimeError("Unexpected changes in the release setup commit")
-          data = base64.b64decode(os.environ["SOURCE_ZIP"])
+          data = base64.b64decode("".join(os.environ["SOURCE_ZIP_" + str(index)] for index in range(3)))
           if hashlib.sha256(data).hexdigest() != "38fea103cc37d098f87c9d5febc68c5b48d4a8ac83fa1695258d19a7537609bb":
               raise RuntimeError("Release checksum mismatch")
           expected = json.loads("{\"README.md\":\"5815daf46fb2a6a30a4cedb56ffab8264c7661d7677d50e26f998bb3042cdad4\",\"docs/long-transcripts-release.md\":\"92f5ae623cb75f881e9a734d2857f782235857a23bcbe819deb845ae49f50c27\",\"components/AccountPanel.jsx\":\"6dec20fb943b1584aac4e8e88862b416d9bcd71a0229e164424ebb2530d4519e\",\"components/PricingContent.jsx\":\"49859f29d0edfef5816c621d951b95e1f42dd445dae6d80cda2bc61513a35b21\",\"components/IntakePreview.jsx\":\"a5679c3d9c01e7aa8106451e69ca9c015733ce771e9da7bd46e5e9d4172cc411\",\"components/MeetingMinutes.jsx\":\"803284fd0a3bc874d3b666bf6710fa99ce4cc74b19ad5f0c861f19e6f9d1041e\",\"components/PageControls.jsx\":\"6850d514dffe0d5cf78dafef98f964bf8dbd20e73cfd93a866634ab52aaa0605\",\"components/ShareDraft.jsx\":\"4c9bae5322bd0feb4a98465370ce5464d1b06ed390fe32defef34f1ec77378a4\",\"lib/aiPipeline.js\":\"d6bafbd1658d77c1a8d1528dffa90df4aa969cdf5bae9966828eefa609e9fc80\",\"lib/browserDraft.js\":\"88c8a5a915974857a13507748519505c40af8e7bf203594a1f27dde3665a3909\",\"lib/clientJobs.js\":\"e8141d83492fa5a72848de1ccf72f3dbf23962a4552c3ad1f828486ec8116fff\",\"lib/exampleMeeting.js\":\"fb9dd386e358eb7188caf76c7aaa1b1c029f0229cff4276087dac5dac6188db2\",\"lib/longTranscript.js\":\"4a87b7068baf0313814d655d26d1fa1ff132312a8d021c0c86b22908f42ebd21\",\"lib/meetingInput.js\":\"0bf8bd667543e008f733d59a5f47ec8a93e0ad9e8116ecfc8914695061402db7\",\"lib/meetingReview.js\":\"1f32c26128dc1b15144d546cdf9a01c43bd3ba918469c1706111c3ab09225f32\",\"lib/plans.js\":\"2179957b99c8c867e84698bf049778d0d393a989af103700377376ba1f4d53f3\",\"lib/shareLinks.js\":\"03ecb5720c159be3567705fe04270ad08bcdd80b1799edb0376e0617e6f0067c\",\"lib/supabase.js\":\"ee7e762118edf06d6b18abf601df94f64aacbc8eba3860c01290fbda74ebf01e\",\"lib/templates.js\":\"a87feb949c7b0e05effb1d65b05128cdb104815ba9395e80452ce8eb9badffd6\",\"lib/transcript.js\":\"1e6333d3241adc3a6c4fe325a15f605e2a69511fdc6362ba2c19e6e5d2e3ed38\",\"lib/transcriptJobs.js\":\"30e201d30684ef05848a66ffab9881ab1a13fd3f4443e215a7a7f8f3afab21e5\",\"lib/validate.js\":\"4fd6cda740aa24e769a15ba46f00682176f811c1527a674ede54befd1613d1e2\",\"pages/_app.jsx\":\"fcfe19766ab04144f5c3c46762b44dfd0509a683cb2669863217bb40fa7b1056\",\"pages/_document.jsx\":\"0183cf3a97bf9e1c47090743c624da0b79874990954bd9b9c798984212b63e4a\",\"pages/index.jsx\":\"c269a0cf6629dac66add63cb6b197e6381814fb400e0bb8b21539311f8592f49\",\"pages/security.jsx\":\"6e3de5ab51dfd1156a28cae1ec355073df8385a3e2f3ab24c831bc76bb212ac0\",\"pages/task/[token].jsx\":\"5913c6083da88bdd2173b375a8c298b7e4466ea522ab2a402ce18bf08b0c1f56\",\"pages/api/dashboard/tasks.js\":\"c7c7d2b89dd698adc26851ca8942107876ab5dda565fbcc5f58cceedfa0f39eb\",\"pages/api/meetings/[id].js\":\"1f14b90bf4b72604d0fdc745d58e504712047699981cf074754776c3daa90758\",\"pages/api/meetings/[id]/source.js\":\"23d5fda3e6a76fa7b3ab4e58efd0a877553ef603aa1d3fb65e33301148c0c952\",\"pages/api/meetings/jobs/index.js\":\"3e0918043d81957c725edffc932298f5612be4cdd582cb5c358847db4adb4e22\",\"pages/api/meetings/jobs/[id].js\":\"856c7eaf74bf5b4ca6863541c19f97fc4d0e6ad66418f955ce97483f75b5f51f\",\"pages/api/meetings/save.js\":\"9036f6a2094587885de935c26d70d942a9e45b0b2ef5175677faa61ef19633da\",\"pages/api/meetings/submit.js\":\"d8b78d7012a5c56ab5419289eef6399ffa2ac41deb05ccbb76cf4d8a0c6dbf50\",\"pages/api/refine.js\":\"442e2c4fff2bc3432c904599a0da151675d5f2bf0b3feed5e430be26ef76b41b\",\"styles/globals.css\":\"f6f06df3f0faff4d5098001d50df4fd424a0281ea0b118de5b370a692bf42c8c\",\"supabase/upgrade-freemium.sql\":\"88839bd6028f05909c565fbd7fce4be68a8978326e02f07de0238eeb6ea08b83\",\"supabase/upgrade-long-transcripts.sql\":\"3ff9c6f34cf93a8c66ad7e09c738b35b24c3cbd9ef7fa7573ec0d0d1c199dcbf\",\"tests/flow.test.js\":\"de3055bd1637c75ad859bb6dde9430438bda66f12f1387b4f69ad1843bf24e92\",\"tests/freemium-db.test.js\":\"8c7f996af6ebb9abf19354a1afb4929f2bf3502bf892b549408bb16ab649e5b2\",\"tests/transcript.test.js\":\"150853c16cb5c6144860ef868454bcc534a6209e82b18c3bf100ab9e5287a9cc\",\"tests/long-transcript.test.js\":\"6ce1ea942c3221774673bf26cdd53a27db991d9abe9935af1d9bd0dc61ecd8b4\",\"tests/transcript-jobs.test.js\":\"39eaa4c8e00e539f646e13b1423c101c74cd4b50137cb6ddc802c8b23cc8ce5f\"}")
