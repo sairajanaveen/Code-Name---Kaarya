@@ -7,7 +7,7 @@ const items = [
   },
   {
     title: "Processing and storage",
-    body: "Notes are sent to the configured AI provider to create a draft. Gemini may fall back to OpenAI. Voice notes are sent to Sarvam for transcription. Saving a review stores the source notes and output in Supabase. These services process data under their own terms."
+    body: "Notes are sent to the configured AI provider to create a draft. Gemini may fall back to OpenAI. Voice notes are sent to Sarvam for transcription. Successful drafts and reviewed output are retained privately in Supabase. These services process data under their own terms; confidential use requires your organization to approve those terms."
   },
   {
     title: "User-controlled sharing",
@@ -18,8 +18,8 @@ const items = [
     body: "Source quotes are checked before generated actions appear. This is not a guarantee that every interpretation is correct. Review commitments, names, dates and recipients before sharing."
   },
   {
-    title: "Current limits",
-    body: "Self-service data deletion, configurable retention, task-link expiry and compliance certifications are not available yet. Contact your workspace operator for deletion. Avoid regulated or highly sensitive information until your organization has approved this deployment."
+    title: "Export and deletion",
+    body: "Meeting history supports export and confirmed deletion of notes, tasks, cached drafts and task links. Minimal usage records remain to enforce allowances. Previously sent emails and external copies cannot be recalled; backups follow the hosting provider's retention policy. Legacy file attachments and scheduled deliveries require operator assistance before deletion. Task-link expiry and compliance certifications are not included in this release."
   }
 ];
 

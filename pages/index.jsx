@@ -7,6 +7,9 @@ import { getAuthClient, authHeaders } from "../lib/browserAuth";
 import { buildPostMeetingEmail, buildMeetingWhatsApp, plainTextToHtml, buildWhatsAppShareUrl } from "../lib/templates";
 import { exampleInput, exampleOutput, createExampleReview } from "../lib/exampleMeeting";
 import { readDraftResponse } from "../lib/clientFlow";
+import AccountPanel from "../components/AccountPanel";
+import PricingContent from "../components/PricingContent";
+import { PLANS } from "../lib/plans";
 
 const blank = { source: "website", meeting_name: "", meeting_date: "", raw_notes: "", attendees: "", agenda: "", email: "", output_focus: "actions" };
 const stages = { reading: "Reading your notes", extracting: "Finding decisions and commitments", checking: "Checking source quotes and dates", retrying: "Trying the backup processor" };
@@ -36,11 +39,11 @@ function GrowingTextarea(props) {
   }, [props.value]);
   return <textarea {...props} ref={element} style={{ overflow: "hidden", resize: "none" }} />;
 }
-async function api(url, body) {
+async function api(url, body, method, extraHeaders = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    const response = await fetch(url, { signal: controller.signal, method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", ...await authHeaders() }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const response = await fetch(url, { signal: controller.signal, method: method || (body ? "POST" : "GET"), headers: { "Content-Type": "application/json", ...await authHeaders(), ...extraHeaders }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "This request could not finish. Please retry.");
     return data;
@@ -54,6 +57,9 @@ function csvCell(value) { return '"' + String(value || "").replace(/"/g, '""').r
 export default function Kaarya() {
   const [form, setForm] = useState(blank);
   const [user, setUser] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [nextOffset, setNextOffset] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [view, setView] = useState("new");
   const [draft, setDraft] = useState(null);
@@ -87,6 +93,10 @@ export default function Kaarya() {
   const streamRef = useRef(null);
   const audioLimitRef = useRef(null);
   const saveKey = useRef(null);
+  const generationKey = useRef(null);
+  const refinementKey = useRef(null);
+  const identityRef = useRef(null);
+  const deleteDialog = useRef(null);
   const fileRef = useRef(null);
   const resultRef = useRef(null);
   const generatingRef = useRef(false);
@@ -106,11 +116,24 @@ export default function Kaarya() {
       if (!auth) { setAuthReady(true); return; }
       subscription = auth.auth.onAuthStateChange((event, session) => {
         if (!active) return;
+        const previousOwner = identityRef.current;
+        identityRef.current = session?.user?.id || null;
         setUser(session?.user || null);
-        if (event === "SIGNED_OUT") { setMeetings([]); setHistoryTasks([]); setDraft(null); setDirty(false); }
+        if (event === "SIGNED_OUT" || (previousOwner && previousOwner !== identityRef.current)) {
+          abortRef.current?.abort();
+          clearTimeout(audioLimitRef.current);
+          if (recorderRef.current) recorderRef.current.onstop = null;
+          if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+          streamRef.current?.getTracks().forEach((track) => track.stop());
+          setMeetings([]); setHistoryTasks([]); setAccount(null); setDraft(null); setDraftPayload(null);
+          setForm({ ...blank, meeting_date: dateToday() }); setUndo(null); setRefine(""); setEmailText(""); setRecipient("");
+          setDirty(false); setDeleteTarget(null); setComposer(false); setRecording(false); setBusy(""); setNotice(""); setError("");
+          setView("new"); setNextOffset(null); setIntegrations({}); setIsExample(false);
+          generationKey.current = null; refinementKey.current = null; saveKey.current = null;
+        }
       }).data.subscription;
       const { data } = await auth.auth.getSession();
-      if (active) { setUser(data.session?.user || null); setAuthReady(true); }
+      if (active) { identityRef.current = data.session?.user?.id || null; setUser(data.session?.user || null); setAuthReady(true); }
     }).catch(() => { if (active) { setAuthReady(true); setError("Your session could not be restored. Please sign in again."); } });
     return () => { active = false; subscription?.unsubscribe(); };
   }, []);
@@ -119,7 +142,12 @@ export default function Kaarya() {
     if (!user) return;
     setRecipient(user.email || "");
     refreshHistory();
+    refreshAccount();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (deleteTarget && deleteDialog.current && !deleteDialog.current.open) deleteDialog.current.showModal();
+  }, [deleteTarget]);
 
   useEffect(() => {
     if (draft) resultRef.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
@@ -153,15 +181,59 @@ export default function Kaarya() {
     return () => window.removeEventListener("beforeunload", protect);
   }, [dirty, busy, isExample]);
 
-  async function refreshHistory() {
+  async function refreshAccount() {
+    const owner = identityRef.current;
+    try { const data = await api("/api/account"); if (identityRef.current === owner) setAccount(data); }
+    catch (err) { if (identityRef.current === owner) setError(err.message); }
+  }
+
+  async function refreshHistory(offset = 0) {
+    const owner = identityRef.current;
     setHistoryBusy(true);
     try {
-      const [data, taskData] = await Promise.all([api("/api/dashboard/meetings"), api("/api/dashboard/tasks")]);
-      setMeetings(data.meetings || []);
+      const [data, taskData] = await Promise.all([api("/api/dashboard/meetings?offset=" + offset), api("/api/dashboard/tasks")]);
+      if (identityRef.current !== owner) return;
+      setMeetings((previous) => offset ? [...previous, ...(data.meetings || []).filter((meeting) => !previous.some((old) => old.id === meeting.id))] : data.meetings || []);
+      setNextOffset(data.next_offset);
       setHistoryTasks(taskData.tasks || []);
       setIntegrations(data.integrations || {});
-    } catch (err) { setError(err.message); }
+    } catch (err) { if (identityRef.current === owner) setError(err.message); }
     finally { setHistoryBusy(false); }
+  }
+
+  async function saveProfile(fields) {
+    const owner = identityRef.current;
+    setBusy("profile"); setError("");
+    try { const data = await api("/api/account", fields, "PATCH"); if (identityRef.current !== owner) return; setAccount(data); notify("Profile saved."); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(""); }
+  }
+
+  async function exportMeeting(meeting) {
+    const owner = identityRef.current;
+    setBusy("export"); setError("");
+    try {
+      const data = await api("/api/meetings/" + meeting.id);
+      if (identityRef.current !== owner) return;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = "kaarya-meeting-" + meeting.meeting_date + ".json"; link.click(); URL.revokeObjectURL(url);
+      notify("Meeting exported.");
+    } catch (err) { setError(err.message); }
+    finally { setBusy(""); }
+  }
+
+  async function deleteMeeting() {
+    if (!deleteTarget || busy) return;
+    const owner = identityRef.current;
+    setBusy("delete"); setError("");
+    try {
+      await api("/api/meetings/" + deleteTarget.id, null, "DELETE", { "x-kaarya-confirm-delete": deleteTarget.id });
+      if (identityRef.current !== owner) return;
+      if (draft?.meeting.id === deleteTarget.id) { setDraft(null); setDirty(false); }
+      setDeleteTarget(null); notify("Meeting deleted. Its task links are no longer active.");
+      await refreshHistory(); await refreshAccount();
+    } catch (err) { setDeleteTarget(null); setError(err.message); }
+    finally { setBusy(""); }
   }
 
   function update(key, value) { setForm((previous) => ({ ...previous, [key]: value })); setIsExample(false); }
@@ -184,24 +256,29 @@ export default function Kaarya() {
     setInputTouched(true); setError(""); setNotice("");
     const issue = assessNotes(form.raw_notes);
     if (issue) { setError(issue); return; }
+    if (form.raw_notes.length > (account?.plan?.inputCharacters || PLANS.free.inputCharacters)) { setError("Your plan supports " + (account?.plan?.inputCharacters || PLANS.free.inputCharacters).toLocaleString("en-IN") + " characters per meeting. Shorten these notes; nothing has been processed."); return; }
     if (!isExample && !user) { setError("Sign in with Google to create a private meeting draft. Your notes will stay here."); return; }
     generatingRef.current = true;
+    const owner = identityRef.current;
     setBusy("generate"); setStage("reading");
     try {
-      const payload = { ...form, meeting_name: form.meeting_name.trim() || "Meeting " + (form.meeting_date || dateToday()), meeting_date: form.meeting_date || dateToday(), review_before_send: true, destination_channels: ["dashboard"] };
+      const payload = { ...form, language_hint: account?.profile?.language || "", meeting_name: form.meeting_name.trim() || "Meeting " + (form.meeting_date || dateToday()), meeting_date: form.meeting_date || dateToday(), review_before_send: true, destination_channels: ["dashboard"] };
       let data;
       if (isExample) data = { meeting: { id: crypto.randomUUID(), title: exampleInput.meeting_name, meeting_date: exampleInput.meeting_date }, structured: clone(exampleOutput), warnings: [], saved: false };
       else {
         abortRef.current = new AbortController();
-        const response = await fetch("/api/meetings/submit", { method: "POST", signal: abortRef.current.signal, headers: { "Content-Type": "application/json", Accept: "application/x-ndjson", ...await authHeaders() }, body: JSON.stringify(payload) });
-        data = await readDraftResponse(response, setStage);
+        const fingerprint = JSON.stringify(payload);
+        if (generationKey.current?.fingerprint !== fingerprint) generationKey.current = { fingerprint, id: crypto.randomUUID() };
+        const response = await fetch("/api/meetings/submit", { method: "POST", signal: abortRef.current.signal, headers: { "Content-Type": "application/json", Accept: "application/x-ndjson", ...await authHeaders() }, body: JSON.stringify({ ...payload, request_id: generationKey.current.id }) });
+        data = await readDraftResponse(response, (next) => { if (identityRef.current === owner) setStage(next); });
       }
+      if (identityRef.current !== owner) return;
       setDraft({ ...data, structured: withIds(data.structured), revision: 0 });
       setDraftPayload(payload);
       setDirty(true); setUndo(null); setComposer(false); saveKey.current = null;
       setTab(payload.output_focus === "prep" ? "prep" : payload.output_focus === "decisions" ? "decisions" : "actions");
-    } catch (err) { setError(err.name === "AbortError" ? "Processing cancelled. Your notes are unchanged." : err.message); }
-    finally { setBusy(""); generatingRef.current = false; }
+    } catch (err) { if (identityRef.current === owner) setError(err.name === "AbortError" ? "Processing cancelled. Your notes are unchanged." : err.message); }
+    finally { setBusy(""); generatingRef.current = false; if (user && !isExample && identityRef.current === owner) { refreshAccount(); refreshHistory(); } }
   }
 
   function editOutput(change) {
@@ -223,9 +300,14 @@ export default function Kaarya() {
     event.preventDefault();
     if (!refine.trim() || busy) return;
     if (isExample) { notify("Example mode: edit the table directly. Sign in to refine your own meeting."); return; }
+    const owner = identityRef.current;
     setBusy("refine"); setError("");
     try {
-      const data = await api("/api/refine", { instruction: refine, structured: stripIds(draft.structured), payload: draftPayload });
+      const request = { instruction: refine, structured: stripIds(draft.structured), payload: draftPayload, meeting_id: draft.meeting.id };
+      const fingerprint = JSON.stringify(request);
+      if (refinementKey.current?.fingerprint !== fingerprint) refinementKey.current = { fingerprint, id: crypto.randomUUID() };
+      const data = await api("/api/refine", { ...request, request_id: refinementKey.current.id });
+      if (identityRef.current !== owner) return;
       setUndo(clone(draft.structured));
       setDraft((previous) => ({ ...previous, ...data, structured: withIds(data.structured, previous.structured.action_items) }));
       setDraftPayload((previous) => ({ ...previous, raw_notes: previous.raw_notes + "\nUser correction: " + refine }));
@@ -236,6 +318,7 @@ export default function Kaarya() {
   }
 
   async function saveDraft() {
+    const owner = identityRef.current;
     if (isExample) throw new Error("This is an example. Create your own meeting to save it.");
     if (!dirty && draft.saved) return draft;
     const id = saveKey.current || crypto.randomUUID();
@@ -244,6 +327,7 @@ export default function Kaarya() {
       meeting: draft.meeting, structured: stripIds(draft.structured), action_ids: draft.structured.action_items.map((task) => task.id),
       revision: draft.revision || 0, save_id: id, source_notes: draftPayload?.raw_notes || ""
     });
+    if (identityRef.current !== owner) throw new Error("Your session changed. Sign in again to continue.");
     const next = { ...draft, saved: true, meeting: saved.meeting, revision: saved.meeting.draft_revision, structured: { ...draft.structured, action_items: draft.structured.action_items.map((task) => ({ ...task, update_token: saved.action_items.find((row) => row.id === task.id)?.update_token })) } };
     setDraft(next); setDirty(false);
     return next;
@@ -251,7 +335,7 @@ export default function Kaarya() {
   async function save() {
     if (busy) return;
     setBusy("save"); setError("");
-    try { await saveDraft(); notify("Saved to your meeting history."); await refreshHistory(); }
+    try { await saveDraft(); notify("Review saved. Your commitments are ready to share."); await refreshHistory(); await refreshAccount(); }
     catch (err) { setError(err.message); }
     finally { setBusy(""); }
   }
@@ -302,6 +386,7 @@ export default function Kaarya() {
   function loadExample() {
     if (busy || recording) return;
     if (dirty && !isExample && !window.confirm("Leave this unsaved draft?")) return;
+    generationKey.current = null; refinementKey.current = null;
     setDraft(createExampleReview());
     setDraftPayload({ ...blank, ...exampleInput });
     setIsExample(true); setDirty(false); setInputTouched(false); setError(""); setNotice("");
@@ -310,20 +395,25 @@ export default function Kaarya() {
   function newMeeting() {
     if (busy) return;
     if (dirty && !isExample && !window.confirm("Leave this unsaved draft?")) return;
+    generationKey.current = null; refinementKey.current = null;
     setDraft(null); setForm({ ...blank, meeting_date: dateToday() }); setIsExample(false); setView("new"); setDirty(false); setError(""); setNotice("");
   }
   async function openMeeting(selectedMeeting) {
     if (busy) return;
     if (dirty && !window.confirm("Leave this unsaved draft?")) return;
+    const owner = identityRef.current;
     setBusy("open"); setError("");
     try {
     const data = await api("/api/dashboard/tasks?meeting_id=" + encodeURIComponent(selectedMeeting.id));
+    if (identityRef.current !== owner) return;
     const meeting = data.meeting;
     const rows = data.tasks;
     const snapshot = meeting.output_snapshot || { summary: meeting.summary || "", language: meeting.language || "unknown", readiness_score: meeting.readiness_score || 0, action_items: [], prep_questions: [], decisions: [], blockers: [] };
-    setDraft({ meeting, structured: { ...snapshot, action_items: rows.map((task) => ({ task: task.task, owner: task.owner || "Unassigned", team: task.team || "", due_date: task.due_date || "", status: task.status, priority: task.priority, evidence: task.evidence || "", id: task.id, update_token: task.update_token, last_nudged_at: task.last_nudged_at })) }, saved: true, revision: meeting.draft_revision || 0, warnings: [] });
+    const reviewed = meeting.status === "reviewed";
+    const actionItems = reviewed ? rows.map((task) => ({ task: task.task, owner: task.owner || "Unassigned", team: task.team || "", due_date: task.due_date || "", status: task.status, priority: task.priority, evidence: task.evidence || "", id: task.id, update_token: task.update_token, last_nudged_at: task.last_nudged_at })) : withIds(snapshot).action_items;
+    setDraft({ meeting, structured: { ...snapshot, action_items: actionItems }, saved: reviewed, retained: true, revision: meeting.draft_revision || 0, warnings: [] });
     setDraftPayload({ ...blank, meeting_name: meeting.title, meeting_date: meeting.meeting_date, raw_notes: meeting.source_notes || "" });
-    setView("new"); setTab("actions"); setIsExample(false); setDirty(false); setUndo(null); setComposer(false); setError(""); setNotice(""); saveKey.current = null;
+    setView("new"); setTab("actions"); setIsExample(false); setDirty(!reviewed); setUndo(null); setComposer(false); setError(""); setNotice(""); saveKey.current = null;
     } catch (err) { setError(err.message); }
     finally { setBusy(""); }
   }
@@ -375,31 +465,39 @@ export default function Kaarya() {
   const readiness = tasks.length ? Math.round(tasks.reduce((sum, task) => sum + (task.owner && task.owner !== "Unassigned" ? 1 : 0) + (task.due_date ? 1 : 0), 0) / (tasks.length * 2) * 100) : 0;
   const blocked = historyTasks.filter((task) => task.status === "blocked").length;
   const open = historyTasks.filter((task) => task.status !== "done").length;
+  const completed = historyTasks.filter((task) => task.status === "done").length;
+  const plan = account?.plan || PLANS.free;
+  const capacityFull = account && account.usage.retained >= plan.retained;
   const inputIssue = inputTouched ? assessNotes(form.raw_notes) : "";
 
   return <div className="kaarya-app">
     <Head><title>Kaarya | Meeting workspace</title><meta name="description" content="Review decisions, assign action items and prepare your next meeting." /></Head>
     <header className="app-header">
       <button className="brand" onClick={() => setView("new")} aria-label="Kaarya workspace"><span className="brand-mark"><ClipboardCheck size={21} /></span>Kaarya<span className="workspace-label">Workspace</span></button>
-      <nav className="top-tabs" aria-label="Workspace"><button aria-current={view === "new" ? "page" : undefined} onClick={() => setView("new")}><FileText size={16} /><span>Meeting</span></button><button aria-current={view === "history" ? "page" : undefined} onClick={() => { setView("history"); if (user) refreshHistory(); }}><History size={16} /><span>History</span></button></nav>
-      {user ? <div className="account"><span title={user.email}>{user.user_metadata?.full_name?.split(" ")[0] || "My account"}</span><ToolButton label="Sign out" onClick={() => { if (!dirty || window.confirm("Sign out and leave this unsaved draft?")) getAuthClient().then((auth) => auth?.auth.signOut()); }}><LogOut size={17} /></ToolButton></div> : <button className="button sign-in" onClick={login} disabled={!authReady}><LogIn size={16} /><span>Sign in with Google</span></button>}
+      <nav className="top-tabs" aria-label="Workspace"><button aria-current={view === "new" ? "page" : undefined} onClick={() => setView("new")}><FileText size={16} /><span>Meeting</span></button><button aria-current={view === "history" ? "page" : undefined} onClick={() => { setView("history"); if (user) refreshHistory(); }}><History size={16} /><span>History</span></button><button aria-current={view === "pricing" ? "page" : undefined} onClick={() => setView("pricing")}>Plans</button></nav>
+      {user ? <div className="account"><button className="profile-trigger" aria-label="Open profile and usage" aria-current={view === "account" ? "page" : undefined} onClick={() => { setView("account"); refreshAccount(); }}><span className="avatar-initial" aria-hidden="true">{(account?.profile?.full_name || user.user_metadata?.full_name || "K").slice(0, 1)}</span><span>{account?.profile?.full_name?.split(" ")[0] || user.user_metadata?.full_name?.split(" ")[0] || "Account"}</span></button><ToolButton label="Sign out" disabled={Boolean(busy) || recording} onClick={() => { if (!dirty || window.confirm("Sign out and leave this unsaved draft?")) getAuthClient().then((auth) => auth?.auth.signOut()); }}><LogOut size={17} /></ToolButton></div> : <button className="button sign-in" onClick={login} disabled={!authReady}><LogIn size={16} /><span>Sign in with Google</span></button>}
     </header>
     <main className="workspace">
       {(error || notice) && <div className={"feedback " + (error ? "error" : "success")} role={error ? "alert" : "status"}><span>{error || notice}</span><ToolButton label="Dismiss message" onClick={() => { setError(""); setNotice(""); }}><X size={16} /></ToolButton></div>}
-      {view === "history" ? <section>
+      {view === "pricing" ? <PricingContent onBack={() => setView("new")} /> : view === "account" && user ? <AccountPanel account={account} onSave={saveProfile} onPricing={() => setView("pricing")} busy={Boolean(busy)} /> : view === "history" ? <section>
         <div className="section-heading"><div><p className="eyebrow">Your workspace</p><h1>Meeting history</h1></div><button className="button primary" onClick={newMeeting}><Plus size={17} />New meeting</button></div>
         {!user ? <div className="empty-state"><ShieldCheck size={30} /><h2>Your meetings, in one place.</h2><div className="button-row"><button className="button primary" onClick={login}><LogIn size={16} />Sign in with Google</button><button className="button" onClick={loadExample}><Sparkles size={16} />Try an example</button></div></div> : <>
-          <div className="history-stats"><div><strong>{meetings.length}</strong><span>Recent meetings</span></div><div><strong>{open}</strong><span>Recent open actions</span></div><div><strong>{blocked}</strong><span>Blocked</span></div><ToolButton label="Refresh history" onClick={refreshHistory} disabled={historyBusy}><RefreshCw size={18} className={historyBusy ? "spin" : ""} /></ToolButton></div>
-          {historyBusy && !meetings.length ? <p role="status">Loading your meetings...</p> : !meetings.length ? <div className="empty-state"><History size={28} /><h2>No saved meetings yet.</h2><button className="button" onClick={newMeeting}>New meeting<ArrowRight size={16} /></button></div> : <div className="meeting-list" aria-busy={busy === "open"}>{busy === "open" && <p role="status">Opening meeting...</p>}{meetings.map((meeting) => <button className="meeting-row" key={meeting.id} disabled={Boolean(busy)} onClick={() => openMeeting(meeting)}><FileText size={21} /><span><strong>{meeting.title}</strong><small>{meeting.meeting_date} · {meeting.status === "reviewed" ? "Reviewed" : "Saved meeting"}</small></span><ArrowRight size={17} /></button>)}</div>}
+          <div className="history-stats"><div><strong>{account?.usage.retained ?? meetings.length}</strong><span>Retained meetings</span></div><div><strong>{open}</strong><span>Recent open actions</span></div><div><strong>{completed}</strong><span>Recent completions</span></div><ToolButton label="Refresh history" onClick={() => { refreshHistory(); refreshAccount(); }} disabled={historyBusy}><RefreshCw size={18} className={historyBusy ? "spin" : ""} /></ToolButton></div>
+          {capacityFull && <div className="quota-banner"><span>{plan.retained} of {plan.retained} meetings retained. Export and delete a meeting to make room.</span><button className="button subtle" onClick={() => setView("pricing")}>View plans<ArrowRight size={15} /></button></div>}
+          {historyBusy && !meetings.length ? <p role="status">Loading your meetings...</p> : !meetings.length ? <div className="empty-state"><History size={28} /><h2>No saved meetings yet.</h2><button className="button" onClick={newMeeting}>New meeting<ArrowRight size={16} /></button></div> : <div className="meeting-list" aria-busy={Boolean(busy)}>{busy === "open" && <p role="status">Opening meeting...</p>}{meetings.map((meeting) => <div className="history-entry" key={meeting.id}><button className="meeting-row" disabled={Boolean(busy)} onClick={() => openMeeting(meeting)}><FileText size={21} /><span><strong>{meeting.title}</strong><small>{meeting.meeting_date} · {meeting.status === "reviewed" ? "Reviewed" : meeting.status === "draft" ? "Awaiting review" : "Saved meeting"}</small></span><ArrowRight size={17} /></button><div className="history-actions"><ToolButton label={"Export " + meeting.title} disabled={Boolean(busy)} onClick={() => exportMeeting(meeting)}><Download size={16} /></ToolButton><ToolButton label={"Delete " + meeting.title} disabled={Boolean(busy)} onClick={() => setDeleteTarget(meeting)}><Trash2 size={16} /></ToolButton></div></div>)}</div>}
+          {nextOffset !== null && <button className="button load-more" disabled={historyBusy} onClick={() => refreshHistory(nextOffset)}>Load more meetings<ChevronDown size={16} /></button>}
         </>}
       </section> : !draft ? <section className="intake-layout">
         <div className="intake-main">
-          <div className="section-heading"><div><p className="eyebrow">01 / Capture</p><h1>New meeting</h1></div><button className="button subtle" onClick={loadExample} disabled={Boolean(busy) || recording}><Sparkles size={16} />Try an example</button></div>
+          <div className="section-heading"><div><p className="eyebrow">{user ? "Welcome back, " + (account?.profile?.full_name?.split(" ")[0] || user.user_metadata?.full_name?.split(" ")[0] || "you") : "01 / Capture"}</p><h1>New meeting</h1></div><button className="button subtle" onClick={loadExample} disabled={Boolean(busy) || recording}><Sparkles size={16} />Try an example</button></div>
+          {account && <div className="workspace-pulse"><button onClick={() => setView("history")}><strong>{open}</strong><span>Open actions</span></button><button onClick={() => setView("history")}><strong>{blocked}</strong><span>Blocked</span></button><button onClick={() => setView("history")} className="completion-count"><CheckCircle2 size={17} /><strong>{completed}</strong><span>Completed</span></button><span className="pulse-caption">Recent actions</span></div>}
+          {account && <div className="allowance-strip"><span>{plan.name} · {Math.max(0, plan.meetings - account.usage.generated)} meeting{plan.meetings - account.usage.generated === 1 ? "" : "s"} left this {plan.period} · {account.usage.retained}/{plan.retained} retained</span><button onClick={() => setView("account")}>Usage<ArrowRight size={13} /></button></div>}
+          {capacityFull && <div className="quota-banner"><span>Your meeting history is full.</span><button className="button subtle" onClick={() => setView("history")}>Manage history<ArrowRight size={15} /></button></div>}
           <form onSubmit={generate}>
             <div className="notes-heading"><label htmlFor="meeting-notes">Meeting notes</label><span className={"badge " + (isExample ? "amber" : "")}>{isExample ? "Example" : "Not shared"}</span></div>
             <textarea id="meeting-notes" className="notes-input" placeholder="Asha will send the client proposal tomorrow. Vendor approval is still blocked..." value={form.raw_notes} onChange={(event) => update("raw_notes", event.target.value)} onBlur={() => setInputTouched(true)} disabled={Boolean(busy)} aria-invalid={Boolean(inputIssue)} aria-describedby={inputIssue ? "input-error" : undefined} />
             {inputIssue && <p id="input-error" className="field-error">{inputIssue}</p>}
-            <div className="capture-toolbar"><div><button type="button" className={"button subtle " + (recording ? "recording" : "")} onClick={record} disabled={Boolean(busy)}>{recording ? <Square size={15} /> : <Mic size={16} />}{recording ? "Stop " + recordSeconds + "s" : "Voice note"}</button><button type="button" className="button subtle" onClick={() => fileRef.current.click()} disabled={Boolean(busy) || recording}><FileText size={16} />Import text</button><input hidden type="file" ref={fileRef} accept=".txt,.md,.vtt,.srt" onChange={importTranscript} /></div><span className="character-count">{form.raw_notes.length.toLocaleString()} / 100k</span></div>
+            <div className="capture-toolbar"><div><button type="button" className={"button subtle " + (recording ? "recording" : "")} onClick={record} disabled={Boolean(busy)}>{recording ? <Square size={15} /> : <Mic size={16} />}{recording ? "Stop " + recordSeconds + "s" : "Voice note"}</button><button type="button" className="button subtle" onClick={() => fileRef.current.click()} disabled={Boolean(busy) || recording}><FileText size={16} />Import text</button><input hidden type="file" ref={fileRef} accept=".txt,.md,.vtt,.srt" onChange={importTranscript} /></div><span className="character-count">{form.raw_notes.length.toLocaleString()} / {(plan.inputCharacters / 1000)}k</span></div>
             <label className="consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />I have consent to record. <span>30-second voice note</span></label>
             <details className="context-fields"><summary>Meeting details <span>Optional</span><ChevronDown size={16} /></summary><div className="field-grid"><Field label="Meeting name"><input maxLength={180} value={form.meeting_name} onChange={(event) => update("meeting_name", event.target.value)} placeholder="Client launch review" /></Field><Field label="Meeting date"><input type="date" value={form.meeting_date} onChange={(event) => update("meeting_date", event.target.value)} required /></Field><Field label="People involved"><input maxLength={1200} value={form.attendees} onChange={(event) => update("attendees", event.target.value)} placeholder="Asha, Rohan, Priya" /></Field><Field label="Meeting outcome"><input maxLength={2000} value={form.agenda} onChange={(event) => update("agenda", event.target.value)} placeholder="Approve the pilot launch" /></Field></div></details>
             <fieldset className="focus-selector"><legend>Focus</legend><div className="segments">{[["actions", "Action items"], ["decisions", "Decisions"], ["prep", "Next meeting"]].map(([value, label]) => <button key={value} type="button" aria-pressed={form.output_focus === value} onClick={() => update("output_focus", value)} disabled={Boolean(busy)}>{label}</button>)}</div></fieldset>
@@ -408,7 +506,7 @@ export default function Kaarya() {
         </div>
         <aside className="intake-aside"><p className="eyebrow">Conversation to accountability</p><ol className="journey"><li className="active"><span>1</span><div><strong>Capture</strong><small>Notes and commitments</small></div></li><li><span>2</span><div><strong>Review</strong><small>Owners, dates, evidence</small></div></li><li><span>3</span><div><strong>Share</strong><small>Approved actions</small></div></li></ol><div className="aside-note"><ClipboardCheck size={23} /><h2>Every action needs<br />a next step.</h2><div className="sample-row"><span className="sample-check"><Check size={13} /></span><span>Send the client proposal<small>Asha · Tomorrow</small></span><span className="badge">Pending</span></div></div><a href="/security" className="privacy-link"><ShieldCheck size={15} />Privacy and data handling<ArrowRight size={14} /></a></aside>
       </section> : <motion.section ref={resultRef} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}>
-        <div className="section-heading review-heading"><div><p className="eyebrow">02 / Review {isExample && "· Example"}</p><h1>{draft.meeting.title}</h1><span className="review-meta">{draft.meeting.meeting_date} · {isExample ? "Example, not saved" : dirty ? "Unsaved draft" : "Saved"}{draft.processing ? " · Draft in " + (draft.processing.duration_ms / 1000).toFixed(1) + "s" : ""}</span></div><div className="button-row"><ToolButton label="Undo last edit" disabled={!undo || Boolean(busy)} onClick={undoEdit}><Undo2 size={17} /></ToolButton><button className="button" onClick={newMeeting} disabled={Boolean(busy)}><Plus size={16} />New meeting</button><button className="button primary" onClick={save} disabled={Boolean(busy) || isExample || (!dirty && draft.saved)}>{busy === "save" ? <Loader2 size={16} className="spin" /> : <Save size={16} />}{draft.saved && !dirty ? "Saved" : "Save review"}</button></div></div>
+        <div className="section-heading review-heading"><div><p className="eyebrow">02 / Review {isExample && "· Example"}</p><h1>{draft.meeting.title}</h1><span className="review-meta">{draft.meeting.meeting_date} · {isExample ? "Example, not saved" : draft.retained && !draft.saved ? "Private draft, awaiting review" : dirty ? "Unsaved changes" : "Review saved"}{draft.processing ? " · Draft in " + (draft.processing.duration_ms / 1000).toFixed(1) + "s" : ""}</span></div><div className="button-row"><ToolButton label="Undo last edit" disabled={!undo || Boolean(busy)} onClick={undoEdit}><Undo2 size={17} /></ToolButton><button className="button" onClick={newMeeting} disabled={Boolean(busy)}><Plus size={16} />New meeting</button><button className="button primary" onClick={save} disabled={Boolean(busy) || isExample || (!dirty && draft.saved)}>{busy === "save" ? <Loader2 size={16} className="spin" /> : <Save size={16} />}{draft.saved && !dirty ? "Saved" : "Save review"}</button></div></div>
         <div className="review-stats"><span><strong>{tasks.length}</strong> actions</span><span className={missing ? "attention" : "positive"}>{missing ? missing + " need an owner or date" : "Owners and dates complete"}</span><span title="Share of action owner and due-date fields completed. Not a meeting productivity or accuracy score.">Action completeness <strong>{readiness}%</strong></span></div>
         {draft.warnings?.length > 0 && <div className="review-warning" role="status">{draft.warnings.join(" ")}</div>}
         <div className="output-tabs" role="tablist" aria-label="Meeting output">{[["actions", "Action items", tasks.length], ["decisions", "Summary & decisions", output.decisions.length], ["prep", "Next meeting", output.prep_questions.length]].map(([value, label, count]) => <button key={value} id={"tab-" + value} role="tab" aria-selected={tab === value} aria-controls="output-panel" tabIndex={tab === value ? 0 : -1} onKeyDown={(event) => { const order = ["actions", "decisions", "prep"]; const index = order.indexOf(tab); const target = event.key === "ArrowRight" ? order[(index + 1) % 3] : event.key === "ArrowLeft" ? order[(index + 2) % 3] : event.key === "Home" ? order[0] : event.key === "End" ? order[2] : null; if (target) { event.preventDefault(); setTab(target); document.getElementById("tab-" + target)?.focus(); } }} onClick={() => setTab(value)}>{label}<span>{count}</span></button>)}</div>
@@ -425,6 +523,7 @@ export default function Kaarya() {
         <AnimatePresence>{composer && <motion.form className="email-composer" onSubmit={send} initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><div className="section-heading"><h2>Email draft</h2><ToolButton label="Close email draft" onClick={() => setComposer(false)} disabled={Boolean(busy)}><X size={18} /></ToolButton></div><Field label="To"><input type="email" multiple required value={recipient} onChange={(event) => setRecipient(event.target.value)} disabled={Boolean(busy)} /></Field><Field label="Message"><textarea rows={12} value={emailText} onChange={(event) => setEmailText(event.target.value)} maxLength={30000} disabled={Boolean(busy)} /></Field><div className="email-footer"><label className="consent"><input type="checkbox" checked={sendLater} onChange={(event) => setSendLater(event.target.checked)} disabled={Boolean(busy)} />Send later</label>{sendLater && <Field label="Delivery time (your local time)"><input type="datetime-local" required value={schedule} onChange={(event) => setSchedule(event.target.value)} disabled={Boolean(busy)} /></Field>}<button type="submit" className="button primary" disabled={Boolean(busy)}>{busy === "send" ? <Loader2 size={16} className="spin" /> : <Send size={16} />}{sendLater ? "Schedule email" : "Send approved email"}</button></div></motion.form>}</AnimatePresence>
       </motion.section>}
     </main>
+    {deleteTarget && <dialog className="delete-dialog" ref={deleteDialog} onCancel={(event) => { if (busy) event.preventDefault(); else setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} aria-labelledby="delete-title"><h2 id="delete-title">Delete this meeting?</h2><p><strong>{deleteTarget.title}</strong></p><p>Its notes, actions and saved drafts will be removed from Kaarya. Task links will stop working. Previously sent emails and external copies will not be recalled. Backups follow the hosting provider's retention policy.</p><p>Today's used meeting allowance will not be restored.</p><div className="button-row"><button className="button" autoFocus disabled={Boolean(busy)} onClick={() => setDeleteTarget(null)}>Keep meeting</button><button className="button danger" disabled={Boolean(busy)} onClick={deleteMeeting}>{busy === "delete" ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}Delete meeting</button></div></dialog>}
     <footer className="app-footer"><span>Kaarya</span><a href="/security">Privacy & data</a><span>Conversations into accountability.</span></footer>
   </div>;
 }

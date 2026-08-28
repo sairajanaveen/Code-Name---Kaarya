@@ -3,6 +3,8 @@ import { extractAccountability } from "../../lib/aiPipeline.js";
 import { validateMeetingPayload, validateStructuredOutput } from "../../lib/validate.js";
 import { consumeQuota } from "../../lib/supabase.js";
 import { AppError, sendError } from "../../lib/http.js";
+import { runMeteredGeneration } from "../../lib/account.js";
+import { getOwnedMeeting } from "../../lib/supabase.js";
 
 export const config = { api: { bodyParser: { sizeLimit: "512kb" } } };
 export const maxDuration = 60;
@@ -16,7 +18,12 @@ export default async function handler(req, res) {
     validateStructuredOutput(structured);
     const { ok, payload, errors } = validateMeetingPayload(input);
     if (!ok) throw new AppError(errors.join(" "), 400);
+    await getOwnedMeeting(req.body.meeting_id, user.id);
     await consumeQuota(user.id, "extract", 12);
-    return res.status(200).json(await extractAccountability({ payload, instruction: instruction.trim(), previous: structured }));
+    return res.status(200).json(await runMeteredGeneration({
+      userId: user.id, requestId: req.body.request_id, meetingId: req.body.meeting_id, kind: "refine",
+      input: { payload, instruction: instruction.trim(), structured },
+      generate: () => extractAccountability({ payload, instruction: instruction.trim(), previous: structured })
+    }));
   } catch (error) { return sendError(res, error); }
 }
