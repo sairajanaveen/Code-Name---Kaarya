@@ -31,7 +31,7 @@ export default function AccountPanel({ account, onSave, onPricing, busy }) {
         <div className="usage-line"><label htmlFor="storage-usage">Retained meetings</label><strong>{usage.retained} / {plan.retained}</strong></div>
         <progress id="storage-usage" aria-label="Retained meeting capacity used" max={plan.retained} value={Math.min(usage.retained, plan.retained)} />
         <p className="usage-detail">Allowance resets {new Date(usage.reset_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} IST.</p>
-        <p className="usage-detail">{plan.inputCharacters.toLocaleString("en-IN")} characters per meeting. {plan.refinements} AI refinement{plan.refinements > 1 ? "s" : ""} per meeting{plan.id === "free" ? ", up to one per day" : ", up to 80 per month"}.</p>
+        <p className="usage-detail">Transcripts up to 8 MiB, with no line-count limit. {plan.refinements} AI refinement{plan.refinements > 1 ? "s" : ""} per meeting{plan.id === "free" ? ", up to one per day" : ", up to 80 per month"}.</p>
         <button className="button" onClick={onPricing}>View plans<ArrowRight size={16} /></button>
         <a className="privacy-link" href="/security"><ShieldCheck size={15} />Privacy & data handling</a>
       </aside>

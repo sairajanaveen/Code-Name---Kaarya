@@ -5,6 +5,7 @@ import { consumeQuota } from "../../lib/supabase.js";
 import { AppError, sendError } from "../../lib/http.js";
 import { runMeteredGeneration } from "../../lib/account.js";
 import { getOwnedMeeting } from "../../lib/supabase.js";
+import { DIRECT_TRANSCRIPT_LENGTH } from "../../lib/meetingInput.js";
 
 export const config = { api: { bodyParser: { sizeLimit: "512kb" } } };
 export const maxDuration = 60;
@@ -18,6 +19,7 @@ export default async function handler(req, res) {
     validateStructuredOutput(structured);
     const { ok, payload, errors } = validateMeetingPayload(input);
     if (!ok) throw new AppError(errors.join(" "), 400);
+    if (payload.raw_notes.length > DIRECT_TRANSCRIPT_LENGTH) throw new AppError("Use the resumable transcript workflow to refine this long meeting.", 413, "USE_TRANSCRIPT_JOB");
     await getOwnedMeeting(req.body.meeting_id, user.id);
     await consumeQuota(user.id, "extract", 12);
     return res.status(200).json(await runMeteredGeneration({

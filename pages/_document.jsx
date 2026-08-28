@@ -4,9 +4,9 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        <meta name="theme-color" content="#050505" />
+        <meta name="theme-color" content="#f8faf9" />
       </Head>
-      <body className="bg-black">
+      <body>
         <Main />
         <NextScript />
       </body>

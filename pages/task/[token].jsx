@@ -52,12 +52,12 @@ export default function TaskUpdatePage({ token }) {
   }
 
   return (
-    <main className="min-h-screen bg-[#050505] px-5 py-10 text-white">
-      <section className="mx-auto max-w-2xl rounded-lg border border-white/10 bg-white/[0.045] p-6">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Kaarya task update</div>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">{task?.task || (loading ? "Loading task..." : "Task unavailable")}</h1>
+    <main className="min-h-screen bg-[#f8faf9] px-5 py-10 text-[#24332e]">
+      <section className="mx-auto max-w-2xl rounded-lg border border-[#dce5e1] bg-white p-6">
+        <div className="text-[11px] font-semibold uppercase tracking-normal text-zinc-500">Kaarya task update</div>
+        <h1 className="mt-3 text-3xl font-semibold tracking-normal">{task?.task || (loading ? "Loading task..." : "Task unavailable")}</h1>
         {!task && message && <p role="alert">{message}</p>}
-        <p className="mt-3 text-sm leading-6 text-zinc-400">Update your progress here. This will reflect back on the Kaarya dashboard.</p>
+        <p className="mt-3 text-sm leading-6 text-zinc-600">Update your progress here. This will reflect back on the Kaarya dashboard.</p>
 
         {task && (
           <form onSubmit={saveStatus} className="mt-6 space-y-5">
@@ -69,25 +69,25 @@ export default function TaskUpdatePage({ token }) {
                   onClick={() => setStatus(value)}
                   disabled={saving}
                   aria-pressed={status === value}
-                  className={`rounded-lg border px-4 py-3 text-sm font-medium transition ${status === value ? "border-white bg-white text-black" : "border-white/10 bg-black text-zinc-300"}`}
+                  className={`rounded-lg border px-4 py-3 text-sm font-medium transition ${status === value ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-[#dce5e1] bg-white text-zinc-600"}`}
                 >
                   {label}
                 </button>
               ))}
             </div>
             <label className="block space-y-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Update note</span>
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-zinc-500">Update note</span>
               <textarea
                 value={evidence}
                 maxLength={2000}
                 disabled={saving}
                 onChange={(event) => setEvidence(event.target.value)}
-                className="min-h-[130px] w-full resize-none rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-white/30"
+                className="min-h-[130px] w-full resize-none rounded-lg border border-[#dce5e1] bg-white px-4 py-3 text-sm text-[#24332e] outline-none focus:border-emerald-600"
                 placeholder="Add progress, blocker, or completion note..."
               />
             </label>
             <button disabled={saving} className="w-full rounded-lg bg-white px-5 py-3 text-sm font-semibold text-black">{saving ? "Saving..." : "Update status"}</button>
-            {message && <p className="text-sm text-emerald-300">{message}</p>}
+            {message && <p className="text-sm text-emerald-700">{message}</p>}
           </form>
         )}
       </section>

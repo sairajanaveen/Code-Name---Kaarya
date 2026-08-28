@@ -78,7 +78,7 @@ begin
   v_limit := case when v_plan = 'free' then 1 else 40 end;
   v_retained := case when v_plan = 'free' then 5 else 500 end;
   v_refs := case when v_plan = 'free' then 1 else 2 end;
-  if p_characters > (case when v_plan = 'free' then 20000 else 100000 end) then raise exception 'INPUT_LIMIT'; end if;
+  if p_characters > 8388608 then raise exception 'INPUT_LIMIT'; end if;
   v_start := date_trunc(case when v_plan = 'free' then 'day' else 'month' end, now() at time zone 'Asia/Kolkata') at time zone 'Asia/Kolkata';
   if p_kind = 'generate' then
     select count(*) into v_count from kaarya_usage_requests where user_id = p_user and kind = 'generate' and created_at >= v_start
@@ -199,7 +199,7 @@ begin
   if coalesce(array_length(p_action_ids, 1), 0) <> jsonb_array_length(p_output->'action_items') then raise exception 'INVALID_ACTION_IDS'; end if;
   if exists(select 1 from action_items where id = any(p_action_ids) and meeting_id <> p_meeting) then raise exception 'NOT_OWNER'; end if;
   update meetings set title = p_title, meeting_date = p_date, summary = p_output->>'summary', language = p_output->>'language',
-    readiness_score = (p_output->>'readiness_score')::integer, output_snapshot = p_output, source_notes = p_notes, status = 'reviewed',
+    readiness_score = (p_output->>'readiness_score')::integer, output_snapshot = p_output, source_notes = coalesce(p_notes, source_notes), status = 'reviewed',
     draft_revision = draft_revision + 1, last_save_id = p_save_id, updated_at = now() where id = p_meeting returning * into m;
   for item in select value from jsonb_array_elements(p_output->'action_items') loop
     idx := idx + 1;

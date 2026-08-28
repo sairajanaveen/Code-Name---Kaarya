@@ -17,8 +17,10 @@ export default async function handler(req, res) {
     await consumeQuota(user.id, "export", 60);
     const tasks = (await listTasks(user.id, meeting.id)).map(({ update_token, meetings, ...task }) => task);
     const { created_by, last_save_id, organization_id, ...record } = meeting;
-    if (record.status === "reviewed" && record.output_snapshot) record.output_snapshot = { ...record.output_snapshot, action_items: tasks };
+    const sourceIncluded = (record.source_notes?.length || 0) <= 40000;
+    if (!sourceIncluded) delete record.source_notes;
+    if (record.status === "reviewed" && record.output_snapshot) record.output_snapshot = { ...record.output_snapshot, action_items: [] };
     res.setHeader("Content-Disposition", 'attachment; filename="kaarya-meeting.json"');
-    return res.status(200).json({ exported_at: new Date().toISOString(), meeting: record, tasks });
+    return res.status(200).json({ exported_at: new Date().toISOString(), meeting: record, tasks, source_included: sourceIncluded });
   } catch (error) { return sendError(res, error); }
 }
