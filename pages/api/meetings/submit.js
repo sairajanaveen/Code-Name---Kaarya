@@ -8,6 +8,7 @@ import { AppError, sendError } from "../../../lib/http.js";
 import { consumeQuota } from "../../../lib/supabase.js";
 import { runMeteredGeneration } from "../../../lib/account.js";
 import { validUuid } from "../../../lib/plans.js";
+import { DIRECT_TRANSCRIPT_LENGTH } from "../../../lib/meetingInput.js";
 
 export const config = { api: { bodyParser: { sizeLimit: "512kb" }, responseLimit: false } };
 export const maxDuration = 60;
@@ -32,6 +33,7 @@ export default async function handler(req, res) {
   try {
     const validation = validateMeetingPayload(normalizeIntakePayload(req.body || {}));
     if (!validation.ok) return res.status(400).json({ error: validation.errors.join(" "), errors: validation.errors });
+    if (validation.payload.raw_notes.length > DIRECT_TRANSCRIPT_LENGTH) return res.status(413).json({ error: "Use the resumable transcript upload flow for this meeting.", code: "USE_TRANSCRIPT_JOB" });
     const user = trustedIntake(req) ? { id: process.env.INTAKE_OWNER_USER_ID } : await requireUser(req);
     if (!validUuid(user.id)) throw new AppError("This intake connection needs a verified workspace owner before it can process meetings.", 503, "INTAKE_OWNER_REQUIRED");
     await consumeQuota(user.id, "extract", 12);

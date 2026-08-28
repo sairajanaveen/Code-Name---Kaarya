@@ -9,6 +9,9 @@ export default async function handler(req, res) {
     if (req.query?.meeting_id) {
       const meeting = await getOwnedMeeting(req.query.meeting_id, user.id);
       const tasks = await listTasks(user.id, meeting.id);
+      meeting.has_source_notes = Boolean(meeting.source_notes);
+      if (meeting.source_notes?.length > 40000) delete meeting.source_notes;
+      if (meeting.status === "reviewed" && meeting.output_snapshot) meeting.output_snapshot = { ...meeting.output_snapshot, action_items: [] };
       return res.status(200).json({ meeting, tasks });
     }
     const [tasks, prep, logs] = await Promise.all([listTasks(user.id), listPrepQuestions(user.id), listDeliveryLogs(user.id)]);

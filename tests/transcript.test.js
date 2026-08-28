@@ -142,7 +142,7 @@ test("refinement grounds against the canonical transcript and the explicit corre
   assert.equal(result.structured.action_items[1].owner, "Ravi");
 });
 
-test("fallback uses the identical canonical source and still rejects invented evidence", async () => {
+test("unsupported proposals become explicit questions, never assigned commitments", async () => {
   config.openaiApiKey = "test-backup";
   let calls = 0;
   globalThis.fetch = async (url, options) => {
@@ -152,14 +152,25 @@ test("fallback uses the identical canonical source and still rejects invented ev
     assert.equal(JSON.parse(body.messages[1].content).transcript, quote);
     return response({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(output("Another invented commitment")) } }] });
   };
-  await assert.rejects(extractAccountability({ payload: { ...exampleInput, raw_notes: vtt } }), { code: "UNGROUNDED_OUTPUT" });
-  assert.equal(calls, 2);
+  const result = await extractAccountability({ payload: { ...exampleInput, raw_notes: vtt } });
+  assert.equal(result.structured.action_items.length, 0);
+  assert.ok(result.structured.open_questions.some((question) => question.startsWith("Confirm whether")));
+  assert.ok(result.warnings.length);
+  assert.equal(calls, 1);
 });
 
-test("bad captions do not call either paid provider", async () => {
+test("empty caption content does not call either paid provider", async () => {
   config.openaiApiKey = "test-backup";
   globalThis.fetch = () => { throw new Error("Must not call network"); };
-  await assert.rejects(extractAccountability({ payload: { ...exampleInput, raw_notes: vtt + "\n\ntruncated cue" } }), { code: "INVALID_TRANSCRIPT" });
+  await assert.rejects(extractAccountability({ payload: { ...exampleInput, raw_notes: "WEBVTT\n\n00:01.000 --> 00:02.000" } }), { code: "WEAK_TRANSCRIPT" });
+});
+
+test("irregular captions with meaningful content are retained without dropping the last line", async () => {
+  const text = vtt + "\n\ntruncated cue\nRavi will send the budget tomorrow.";
+  const prepared = await prepareTranscript(text, { tolerant: true });
+  assert.equal(prepared.text, text);
+  assert.equal(prepared.format, "unstructured_captions");
+  assert.ok(prepared.warnings.length);
 });
 
 function responseMock() {
@@ -191,7 +202,7 @@ test("submission retains original captions privately, not the processed transcri
   assert.equal(res.chunks.at(-1).type, "result");
 });
 
-test("invalid caption submission releases its meeting allowance and never stores success", async () => {
+test("weak caption submission releases its meeting allowance and never stores success", async () => {
   let released = false;
   globalThis.fetch = async (url) => {
     if (url.endsWith("/auth/v1/user")) return response({ id: "11111111-1111-4111-8111-111111111111" });
@@ -201,8 +212,9 @@ test("invalid caption submission releases its meeting allowance and never stores
     throw new Error("AI or successful storage must not be called");
   };
   const res = responseMock();
-  await submit({ method: "POST", headers: { authorization: "Bearer test", accept: "application/x-ndjson" }, body: { ...exampleInput, raw_notes: vtt + "\n\ntruncated cue" } }, res);
+  const weak = "WEBVTT\n\n00:01.000 --> 00:02.000\nhello\n\n00:02.000 --> 00:03.000\nhello";
+  await submit({ method: "POST", headers: { authorization: "Bearer test", accept: "application/x-ndjson" }, body: { ...exampleInput, raw_notes: weak } }, res);
   assert.ok(released);
-  assert.equal(res.chunks.at(-1).code, "INVALID_TRANSCRIPT");
+  assert.equal(res.chunks.at(-1).code, "WEAK_TRANSCRIPT");
   assert.ok(!res.chunks.some((event) => event.type === "result"));
 });
