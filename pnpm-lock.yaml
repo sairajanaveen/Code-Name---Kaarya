@@ -20,6 +20,9 @@ importers:
       lucide-react:
         specifier: ^0.370.0
         version: 0.370.0(react@18.2.0)
+      media-captions:
+        specifier: 0.0.18
+        version: 0.0.18
       next:
         specifier: 14.2.35
         version: 14.2.35(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -373,6 +376,10 @@ packages:
     resolution: {integrity: sha512-659R7tNK+QY3Af/hikV/+MdIWOQJ5GDfKdrs+5k08hWPlWNAoshUtvNuGl9PMeC3J1NZ07bUnyWd0eJR2okHOg==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0
+
+  media-captions@0.0.18:
+    resolution: {integrity: sha512-JW18P6FuHdyLSGwC4TQ0kF3WdNj/+wMw2cKOb8BnmY6vSJGtnwJ+vkYj+IjHOV34j3XMc70HDeB/QYKR7E7fuQ==}
+    engines: {node: '>=16'}
 
   merge2@1.4.1:
     resolution: {integrity: sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg==}
@@ -868,6 +875,8 @@ snapshots:
   lucide-react@0.370.0(react@18.2.0):
     dependencies:
       react: 18.2.0
+
+  media-captions@0.0.18: {}
 
   merge2@1.4.1: {}
 
