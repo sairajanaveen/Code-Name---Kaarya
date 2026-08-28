@@ -6,6 +6,8 @@ import { validateMeetingPayload } from "../../../lib/validate.js";
 import { extractAccountability } from "../../../lib/aiPipeline.js";
 import { AppError, sendError } from "../../../lib/http.js";
 import { consumeQuota } from "../../../lib/supabase.js";
+import { runMeteredGeneration } from "../../../lib/account.js";
+import { validUuid } from "../../../lib/plans.js";
 
 export const config = { api: { bodyParser: { sizeLimit: "512kb" }, responseLimit: false } };
 export const maxDuration = 60;
@@ -30,7 +32,8 @@ export default async function handler(req, res) {
   try {
     const validation = validateMeetingPayload(normalizeIntakePayload(req.body || {}));
     if (!validation.ok) return res.status(400).json({ error: validation.errors.join(" "), errors: validation.errors });
-    const user = trustedIntake(req) ? { id: "integration" } : await requireUser(req);
+    const user = trustedIntake(req) ? { id: process.env.INTAKE_OWNER_USER_ID } : await requireUser(req);
+    if (!validUuid(user.id)) throw new AppError("This intake connection needs a verified workspace owner before it can process meetings.", 503, "INTAKE_OWNER_REQUIRED");
     await consumeQuota(user.id, "extract", 12);
     streaming = String(req.headers.accept || "").includes("application/x-ndjson");
     if (streaming) {
@@ -40,16 +43,10 @@ export default async function handler(req, res) {
     }
     const emit = (event) => { if (streaming && !res.destroyed) res.write(JSON.stringify(event) + "\n"); };
     emit({ type: "stage", stage: "reading" });
-    const result = await extractAccountability({
-      payload: validation.payload, signal: controller.signal,
-      onStage: (stage) => emit({ type: "stage", stage })
+    const data = await runMeteredGeneration({
+      userId: user.id, requestId: req.body?.request_id || randomUUID(), input: { payload: validation.payload },
+      generate: () => extractAccountability({ payload: validation.payload, signal: controller.signal, onStage: (stage) => emit({ type: "stage", stage }) })
     });
-    const data = {
-      ...result,
-      meeting: { id: randomUUID(), title: validation.payload.meeting_name, meeting_date: validation.payload.meeting_date, status: "draft" },
-      saved: false,
-      delivery: { status: "not_sent" }
-    };
     if (streaming) { emit({ type: "result", data }); return res.end(); }
     return res.status(200).json(data);
   } catch (error) {
