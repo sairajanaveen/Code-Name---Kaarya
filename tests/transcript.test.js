@@ -18,7 +18,7 @@ let originalFetch, savedConfig;
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   savedConfig = { ...config };
-  Object.assign(config, { llmApiKey: "test-gemini", llmProvider: "gemini", llmModel: "gemini-2.5-flash", openaiApiKey: "", supabaseUrl: "https://workspace.test", supabaseServiceKey: "test-service", supabaseAnonKey: "test-anon" });
+  Object.assign(config, { llmApiKey: "test-gemini", llmProvider: "gemini", llmModel: "gemini-2.5-flash", llmFallbackProvider: "", llmFallbackApiKey: "", llmFallbackModel: "", openaiApiKey: "", supabaseUrl: "https://workspace.test", supabaseServiceKey: "test-service", supabaseAnonKey: "test-anon" });
 });
 afterEach(() => { globalThis.fetch = originalFetch; Object.assign(config, savedConfig); });
 
