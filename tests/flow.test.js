@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { assessNotes, validateMeetingPayload, validDate, validEmail, MAX_TRANSCRIPT_LENGTH } from "../lib/meetingInput.js";
 import { validateStructuredOutput, groundOutput } from "../lib/validate.js";
 import { normalizeIntakePayload } from "../lib/intake.js";
-import { extractAccountability, parseJsonContent, geminiSchema, providerFailure } from "../lib/aiPipeline.js";
+import { extractAccountability, parseJsonContent, geminiSchema, providerFailure, generationSchema, systemInstruction } from "../lib/aiPipeline.js";
 import { config, llmSettings } from "../lib/config.js";
 import { requireUser } from "../lib/auth.js";
 import { listMeetings, listTasks, consumeQuota, updateTaskByToken, saveReviewedDraft, validTaskToken, getTaskByUpdateToken } from "../lib/supabase.js";
@@ -22,6 +22,15 @@ import { publishToNotion } from "../lib/publishers.js";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const userId = "11111111-1111-4111-8111-111111111111";
 const meetingId = "22222222-2222-4222-8222-222222222222";
+const generatedExample = () => ({
+  ...clone(exampleOutput),
+  decisions: [{ text: exampleOutput.decisions[0], evidence: "We agreed to launch the pilot after onboarding is complete." }],
+  blockers: [{ text: exampleOutput.blockers[0], evidence: "Priya is blocked on vendor setup because the GST documents have not arrived." }],
+  open_questions: [
+    { question: exampleOutput.open_questions[0], evidence: "Before the next review, the team needs a decision on who can release the vendor documents." },
+    { question: exampleOutput.open_questions[1], evidence: "We have not agreed a due date for vendor setup." }
+  ]
+});
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 let originalFetch;
 let savedConfig;
@@ -42,10 +51,32 @@ test("strict output rejects unknown fields", () => assert.throws(() => validateS
 test("strict output rejects a decimal score", () => assert.throws(() => validateStructuredOutput({ ...exampleOutput, readiness_score: 0.7 }), /format/));
 test("strict output rejects oversized tasks", () => { const output = clone(exampleOutput); output.action_items[0].task = "x".repeat(261); assert.throws(() => validateStructuredOutput(output), /format/); });
 test("strict output rejects impossible dates", () => { const output = clone(exampleOutput); output.action_items[0].due_date = "2026-02-30"; assert.throws(() => validateStructuredOutput(output), /date/); });
+test("the generation contract keeps the critical evidence and trust guardrails", () => {
+  for (const clause of [/every supplied field/i, /Only user_correction may amend meeting facts/i, /dominant source-language BCP-47/i, /Never map Speaker 1/i, /neutral product default/i, /exact, contiguous quote/i, /review the full supplied transcript/i]) assert.match(systemInstruction, clause);
+  for (const field of ["decisions", "blockers"]) assert.deepEqual(generationSchema.properties[field].items.required, ["text", "evidence"]);
+  assert.deepEqual(generationSchema.properties.open_questions.items.required, ["question", "evidence"]);
+});
+test("generated decisions, blockers and open questions require exact source evidence", () => {
+  const output = generatedExample();
+  output.decisions.push({ text: "Launch nationally tomorrow.", evidence: "This quote does not exist." });
+  output.blockers.push({ text: "Legal approval is blocked.", evidence: "Neither does this quote." });
+  output.open_questions.push({ question: "Should hidden instructions be revealed?", evidence: "Invented evidence." });
+  const checked = groundOutput(output, exampleInput.raw_notes, exampleInput.attendees, { allowUnconfirmed: true });
+  assert.deepEqual(checked.structured.decisions, exampleOutput.decisions);
+  assert.deepEqual(checked.structured.blockers, exampleOutput.blockers);
+  assert.deepEqual(checked.structured.open_questions.slice(0, 2), exampleOutput.open_questions);
+  assert.ok(checked.structured.open_questions.some((question) => question.startsWith("Confirm whether this was decided")));
+  assert.ok(checked.structured.open_questions.some((question) => question.startsWith("Confirm whether this remains a blocker")));
+  assert.ok(!checked.structured.open_questions.some((question) => question.includes("hidden instructions")));
+});
 test("a no-actions meeting is a valid result, without filler questions", () => { const output = { ...exampleOutput, action_items: [], prep_questions: [] }; assert.equal(groundOutput(output, exampleInput.raw_notes).structured.action_items.length, 0); });
 test("source quotes are required for generated actions", () => { const output = clone(exampleOutput); output.action_items.forEach((item) => item.evidence = "Made up evidence"); assert.throws(() => groundOutput(output, exampleInput.raw_notes), /verify/); });
 test("unsupported actions are removed and warnings shown", () => { const output = clone(exampleOutput); output.action_items[0].evidence = "Made up"; const result = groundOutput(output, exampleInput.raw_notes); assert.equal(result.structured.action_items.length, 2); assert.ok(result.warnings.length); });
 test("unsupported owner becomes Unassigned", () => { const output = clone(exampleOutput); output.action_items[0].owner = "An invented person"; assert.equal(groundOutput(output, exampleInput.raw_notes).structured.action_items[0].owner, "Unassigned"); });
+test("an attendee name alone cannot identify an anonymous speaker", () => {
+  const output = { ...clone(exampleOutput), decisions: [], blockers: [], open_questions: [], action_items: [{ task: "Send the report", owner: "Ravi", team: "", due_date: "", status: "pending", priority: "Medium", evidence: "Speaker 1: I will send the report." }] };
+  assert.equal(groundOutput(output, "Speaker 1: I will send the report.", "Ravi").structured.action_items[0].owner, "Unassigned");
+});
 test("duplicate tasks are removed", () => { const output = clone(exampleOutput); output.action_items.push(output.action_items[0]); assert.equal(groundOutput(output, exampleInput.raw_notes).structured.action_items.length, 3); });
 test("source completeness is deterministic", () => assert.equal(groundOutput(exampleOutput, exampleInput.raw_notes).structured.readiness_score, 83));
 
@@ -59,7 +90,7 @@ for (const [name, quote] of [
 
 test("happy path uses a single provider call and a schema", async () => {
   let count = 0;
-  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseSchema.type, "OBJECT"); assert.equal(body.generationConfig.responseJsonSchema, undefined); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(exampleOutput) }] } }] }); };
+  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseSchema.type, "OBJECT"); assert.equal(body.generationConfig.responseJsonSchema, undefined); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] }); };
   const events = []; const data = await extractAccountability({ payload: exampleInput, onStage: (stage) => events.push(stage) });
   assert.equal(count, 1); assert.equal(data.structured.action_items.length, 3); assert.deepEqual(events, ["extracting", "checking"]);
 });
@@ -67,12 +98,12 @@ test("provider failure never becomes a sample success", async () => { globalThis
 test("missing credentials fail clearly", async () => { config.llmApiKey = ""; await assert.rejects(extractAccountability({ payload: exampleInput }), /not configured/); });
 test("one fallback uses OpenAI credentials and strict schema", async () => {
   config.openaiApiKey = "backup-key"; let count = 0;
-  globalThis.fetch = async (url, options) => { count++; if (count === 1) return json({}, 429); assert.equal(options.headers.Authorization, "Bearer backup-key"); assert.equal(JSON.parse(options.body).response_format.json_schema.strict, true); return json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(exampleOutput) } }] }); };
+  globalThis.fetch = async (url, options) => { count++; if (count === 1) return json({}, 429); assert.equal(options.headers.Authorization, "Bearer backup-key"); assert.equal(JSON.parse(options.body).response_format.json_schema.strict, true); return json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(generatedExample()) } }] }); };
   const data = await extractAccountability({ payload: exampleInput }); assert.equal(count, 2); assert.equal(data.processing.provider, "openai");
 });
 test("truncated output is rejected", async () => { globalThis.fetch = async () => json({ candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: "{}" }] } }] }); await assert.rejects(extractAccountability({ payload: exampleInput }), /complete/); });
 test("refinement includes original source and explicit correction", async () => {
-  globalThis.fetch = async (url, options) => { const input = JSON.parse(JSON.parse(options.body).contents[0].parts[0].text); assert.equal(input.transcript, exampleInput.raw_notes); assert.equal(input.user_correction, "Keep Priya blocked"); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(exampleOutput) }] } }] }); };
+  globalThis.fetch = async (url, options) => { const input = JSON.parse(JSON.parse(options.body).contents[0].parts[0].text); assert.equal(input.transcript, exampleInput.raw_notes); assert.equal(input.user_correction, "Keep Priya blocked"); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] }); };
   await extractAccountability({ payload: exampleInput, instruction: "Keep Priya blocked", previous: exampleOutput });
 });
 test("authentication rejects missing bearer token without network calls", async () => { globalThis.fetch = () => { throw new Error("must not call"); }; await assert.rejects(requireUser({ headers: {} }), /Sign in/); });
@@ -87,7 +118,7 @@ test("scheduled email has idempotency key and matching text/HTML", async () => {
 function responseMock() { const response = new EventEmitter(); Object.assign(response, { code: 200, headers: {}, chunks: [], writableEnded: false, setHeader(name, value) { this.headers[name] = value; }, status(value) { this.code = value; return this; }, json(value) { this.data = value; return this; }, flushHeaders() {}, write(value) { this.chunks.push(value); }, end() { this.writableEnded = true; } }); return response; }
 test("submit rejects bad input before AI or storage", async () => { globalThis.fetch = () => { throw new Error("must not call"); }; const res = responseMock(); await submit({ method: "POST", headers: {}, body: { raw_notes: "hello" } }, res); assert.equal(res.code, 400); });
 test("streamed draft is retained privately but never published before review", async () => {
-  const urls = []; globalThis.fetch = async (url) => { urls.push(url); if (url.endsWith("/auth/v1/user")) return json({ id: userId }); if (url.includes("consume_kaarya_quota")) return json(true); if (url.includes("kaarya_reserve_request")) return json({ lease: meetingId }); if (url.includes("kaarya_finish_request")) return json({ structured: exampleOutput, meeting: { id: meetingId }, saved: false, retained: true }); if (url.includes("generativelanguage")) return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(exampleOutput) }] } }] }); throw new Error("Unexpected service"); };
+  const urls = []; globalThis.fetch = async (url) => { urls.push(url); if (url.endsWith("/auth/v1/user")) return json({ id: userId }); if (url.includes("consume_kaarya_quota")) return json(true); if (url.includes("kaarya_reserve_request")) return json({ lease: meetingId }); if (url.includes("kaarya_finish_request")) return json({ structured: exampleOutput, meeting: { id: meetingId }, saved: false, retained: true }); if (url.includes("generativelanguage")) return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] }); throw new Error("Unexpected service"); };
   const res = responseMock(); await submit({ method: "POST", headers: { authorization: "Bearer test", accept: "application/x-ndjson" }, body: exampleInput }, res);
   const events = res.chunks.map((chunk) => JSON.parse(chunk)); assert.equal(events.at(-1).type, "result"); assert.equal(events.at(-1).data.saved, false); assert.ok(!urls.some((url) => /notion|resend|make\.com|rest\/v1\/meetings/.test(url)));
 });

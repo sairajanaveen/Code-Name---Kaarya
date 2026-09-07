@@ -95,6 +95,20 @@ test("all section minutes survive merging and repeated actions are deduplicated"
   validateStructuredOutput(merged.structured);
 });
 
+test("large section summaries collapse into a bounded evidence-based overview", () => {
+  const reports = Array.from({ length: 12 }, (_, index) => ({
+    structured: { ...structuredClone(exampleOutput), summary: "Section " + (index + 1) + ": " + "substantive detail ".repeat(180) },
+    warnings: []
+  }));
+  const merged = mergeSectionReports(reports);
+  assert.ok(merged.structured.summary.length <= 1800);
+  assert.match(merged.structured.summary, /12 transcript sections/);
+  assert.match(merged.structured.summary, /1 verified decision/);
+  assert.match(merged.structured.summary, /3 source-linked actions/);
+  assert.match(merged.structured.summary, /complete chronological discussion/i);
+  validateStructuredOutput(merged.structured);
+});
+
 test("conflicting owners and dates are preserved with an explicit review warning", () => {
   const first = { structured: structuredClone(exampleOutput), warnings: [] };
   const second = structuredClone(first);
