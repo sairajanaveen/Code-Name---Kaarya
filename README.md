@@ -1,6 +1,6 @@
 # Kaarya
 
-Kaarya turns meeting notes into complete minutes and reviewed actions: capture, review, then share. Supabase stores private meeting history, Gemini extracts structured drafts, OpenAI is an optional fallback, and Resend sends approved email directly. Gmail/Outlook and WhatsApp compose handoffs are also available.
+Kaarya turns meeting notes into complete minutes and reviewed actions: capture, review, then share. Supabase stores private meeting history, OpenAI extracts structured drafts with a bounded second-model fallback, and Resend sends approved email directly. Gemini remains available only when explicitly configured. Gmail/Outlook and WhatsApp compose handoffs are also available.
 
 **Before deploying this release, follow [Light Workspace And Long Transcripts](docs/long-transcripts-release.md). Apply the long-transcript migration after the focus-flow and freemium migrations.**
 
@@ -18,7 +18,7 @@ Configure `.env.local` using the variable names in `.env.example`; never commit 
 
 1. For a new project, run `supabase/schema.sql`. Then apply `supabase/upgrade-focus-flow.sql`, `supabase/upgrade-freemium.sql`, and `supabase/upgrade-long-transcripts.sql` in order. For an existing freemium installation, only the new long-transcript migration is needed. Existing ownership is never reassigned.
 2. Configure Supabase Google OAuth and the production redirect URL; configure the Supabase URL, publishable/anon key and server-only service-role key.
-3. Configure the chosen primary AI provider and optional OpenAI fallback. Sarvam is used for short voice-note transcription, not an extra translation call on every text input.
+3. Configure `OPENAI_API_KEY`; the default route uses `gpt-5.4-mini` with `gpt-4.1-mini` as one bounded fallback. Provider, model and fallback variables in `.env.example` can override this route. Sarvam is used for short voice-note transcription, not an extra translation call on every text input.
 4. Configure Resend and a verified sender domain. Email acceptance is not proof of inbox delivery.
 5. Teams, Notion and Slack are deferred from this release's core UI. Existing backend destinations are deployment-level connections, not per-customer OAuth connections.
 6. Test the live acceptance checklist with two separate test accounts before inviting clients.

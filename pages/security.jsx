@@ -11,7 +11,7 @@ const items = [
   },
   {
     title: "Processing and storage",
-    body: "Notes are sent to the configured AI provider to create a draft. Gemini may fall back to OpenAI. Voice notes are sent to Sarvam for transcription. Successful drafts and reviewed output are retained privately in Supabase. These services process data under their own terms; confidential use requires your organization to approve those terms."
+    body: "Notes are sent to the configured AI provider to create a draft. The default OpenAI route may make one bounded second-model attempt after a retryable failure; Gemini is used only when explicitly configured. Voice notes are sent to Sarvam for transcription. Successful drafts and reviewed output are retained privately in Supabase. These services process data under their own terms; confidential use requires your organization to approve those terms."
   },
   {
     title: "Long transcript uploads",
