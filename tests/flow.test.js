@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { assessNotes, validateMeetingPayload, validDate, validEmail, MAX_TRANSCRIPT_LENGTH } from "../lib/meetingInput.js";
 import { validateStructuredOutput, groundOutput } from "../lib/validate.js";
 import { normalizeIntakePayload } from "../lib/intake.js";
-import { extractAccountability, parseJsonContent, geminiSchema, providerFailure, generationSchema, systemInstruction } from "../lib/aiPipeline.js";
+import { extractAccountability, parseJsonContent, geminiSchema, providerFailure, generationSchema, systemInstruction, aiAttemptPlan } from "../lib/aiPipeline.js";
 import { config, llmSettings } from "../lib/config.js";
 import { requireUser } from "../lib/auth.js";
 import { listMeetings, listTasks, consumeQuota, updateTaskByToken, saveReviewedDraft, validTaskToken, getTaskByUpdateToken } from "../lib/supabase.js";
@@ -34,7 +34,7 @@ const generatedExample = () => ({
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 let originalFetch;
 let savedConfig;
-beforeEach(() => { originalFetch = globalThis.fetch; savedConfig = { ...config }; config.llmApiKey = "test-gemini"; config.llmProvider = "gemini"; config.llmModel = "gemini-2.5-flash"; config.openaiApiKey = ""; config.supabaseUrl = "https://workspace.test"; config.supabaseAnonKey = "test-anon"; config.supabaseServiceKey = "test-service"; config.resendApiKey = "test-resend"; });
+beforeEach(() => { originalFetch = globalThis.fetch; savedConfig = { ...config }; Object.assign(config, { llmApiKey: "test-gemini", llmProvider: "gemini", llmModel: "gemini-2.5-flash", llmFallbackProvider: "", llmFallbackApiKey: "", llmFallbackModel: "", openaiApiKey: "", supabaseUrl: "https://workspace.test", supabaseAnonKey: "test-anon", supabaseServiceKey: "test-service", resendApiKey: "test-resend" }); });
 afterEach(() => { globalThis.fetch = originalFetch; Object.assign(config, savedConfig); });
 
 for (const value of ["", "hello", "test ".repeat(50), "!!!!!!!!!!!!!!!!!!!!!!!!!"]) test("blocks weak input: " + value.slice(0, 20), () => assert.ok(assessNotes(value)));
@@ -99,7 +99,24 @@ test("missing credentials fail clearly", async () => { config.llmApiKey = ""; aw
 test("one fallback uses OpenAI credentials and strict schema", async () => {
   config.openaiApiKey = "backup-key"; let count = 0;
   globalThis.fetch = async (url, options) => { count++; if (count === 1) return json({}, 429); assert.equal(options.headers.Authorization, "Bearer backup-key"); assert.equal(JSON.parse(options.body).response_format.json_schema.strict, true); return json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(generatedExample()) } }] }); };
-  const data = await extractAccountability({ payload: exampleInput }); assert.equal(count, 2); assert.equal(data.processing.provider, "openai");
+  const data = await extractAccountability({ payload: exampleInput }); assert.equal(count, 2); assert.equal(data.processing.provider, "openai"); assert.deepEqual(data.processing.attempts.map(({ role, outcome, code }) => ({ role, outcome, code })), [{ role: "primary", outcome: "failed", code: "AI_QUOTA" }, { role: "fallback", outcome: "succeeded", code: undefined }]);
+});
+test("OpenAI primary uses GPT-5 low-latency settings and strict structured output", async () => {
+  Object.assign(config, { llmProvider: "openai", llmApiKey: "primary-key", llmModel: "gpt-5.4-mini", llmFallbackProvider: "openai", llmFallbackApiKey: "primary-key", llmFallbackModel: "gpt-4.1-mini", openaiApiKey: "primary-key" });
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://api.openai.com/v1/chat/completions");
+    assert.equal(options.headers.Authorization, "Bearer primary-key");
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, "gpt-5.4-mini");
+    assert.equal(body.reasoning_effort, "none");
+    assert.equal(body.temperature, undefined);
+    assert.equal(body.response_format.json_schema.strict, true);
+    return json({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(generatedExample()) } }], usage: { prompt_tokens: 100, completion_tokens: 50, completion_tokens_details: { reasoning_tokens: 0 } } });
+  };
+  const data = await extractAccountability({ payload: exampleInput });
+  assert.equal(data.processing.model, "gpt-5.4-mini");
+  assert.equal(data.processing.attempts[0].thinking_tokens, 0);
+  assert.equal(data.processing.attempts[0].outcome, "succeeded");
 });
 test("truncated output is rejected", async () => { globalThis.fetch = async () => json({ candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: "{}" }] } }] }); await assert.rejects(extractAccountability({ payload: exampleInput }), /complete/); });
 test("refinement includes original source and explicit correction", async () => {
@@ -204,6 +221,19 @@ test("explicit AI configuration takes precedence and normalizes provider/model",
   assert.equal(settings.llmProvider, "gemini");
   assert.equal(settings.llmModel, "gemini-2.5-flash");
   assert.equal(settings.llmApiKey, "configured");
+});
+test("OpenAI is preferred when both provider keys exist and gets one bounded fallback", () => {
+  const settings = llmSettings({ OPENAI_API_KEY: "openai", GEMINI_API_KEY: "gemini" });
+  assert.equal(settings.llmProvider, "openai");
+  assert.equal(settings.llmModel, "gpt-5.4-mini");
+  assert.equal(settings.llmFallbackProvider, "openai");
+  assert.equal(settings.llmFallbackModel, "gpt-4.1-mini");
+  const plan = aiAttemptPlan(settings);
+  assert.deepEqual(plan.map(({ role, provider, model, timeoutMs }) => ({ role, provider, model, timeoutMs })), [
+    { role: "primary", provider: "openai", model: "gpt-5.4-mini", timeoutMs: 36000 },
+    { role: "fallback", provider: "openai", model: "gpt-4.1-mini", timeoutMs: 16000 }
+  ]);
+  assert.ok(plan.reduce((sum, attempt) => sum + attempt.timeoutMs, 0) < 60000);
 });
 test("Gemini receives supported schema while local string limits stay intact", () => {
   const schema = { type: "object", properties: { task: { type: "string", minLength: 1, maxLength: 260 } }, required: ["task"], additionalProperties: false };
