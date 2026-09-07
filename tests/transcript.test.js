@@ -11,7 +11,7 @@ import submit from "../pages/api/meetings/submit.js";
 // Synthetic transcript only: never copy customer meeting content into fixtures.
 const quote = "Asha: I will send the signed proposal to the client tomorrow.";
 const vtt = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nAsha: I will send the signed\n\n2\n00:00:03.000 --> 00:00:06.000\nAsha: proposal to the client tomorrow.";
-const output = (evidence = quote) => ({ ...exampleOutput, action_items: [{ ...exampleOutput.action_items[0], owner: "Asha", evidence }], prep_questions: [] });
+const output = (evidence = quote) => ({ ...exampleOutput, decisions: [], blockers: [], open_questions: [], action_items: [{ ...exampleOutput.action_items[0], owner: "Asha", evidence }], prep_questions: [] });
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const geminiResponse = (value) => response({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(value) }] } }] });
 let originalFetch, savedConfig;
@@ -118,7 +118,7 @@ test("pipeline sends the canonical transcript once and retains raw source length
     calls++;
     const request = JSON.parse(options.body);
     assert.equal(JSON.parse(request.contents[0].parts[0].text).transcript, quote);
-    assert.match(request.systemInstruction.parts[0].text, /no paraphrasing/);
+    assert.match(request.systemInstruction.parts[0].text, /no paraphrase/);
     return geminiResponse(output());
   };
   const result = await extractAccountability({ payload });
