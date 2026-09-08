@@ -20,7 +20,7 @@ async function meeting(owner = user) {
 before(async () => {
   db = new PGlite({ extensions: { pgcrypto } });
   await db.exec("create role anon; create role authenticated; create role service_role; create schema auth; create schema extensions; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as $$ select null::uuid $$;");
-  for (const file of ["schema.sql", "upgrade-focus-flow.sql", "upgrade-freemium.sql", "upgrade-long-transcripts.sql"]) {
+  for (const file of ["schema.sql", "upgrade-focus-flow.sql", "upgrade-freemium.sql", "upgrade-long-transcripts.sql", "harden-security-lints.sql"]) {
     try { await db.exec(await readFile(new URL("../supabase/" + file, import.meta.url), "utf8")); }
     catch (error) { throw new Error(file + ": " + error.message + " at " + error.position); }
   }
@@ -237,6 +237,12 @@ test("job tables and privileged RPCs are not accessible to browser roles",async(
     assert.equal(await scalar("select relrowsecurity from pg_class where relname=$1",[table]),true);
   }
   assert.equal(await scalar("select has_function_privilege('anon','kaarya_job_claim(uuid,uuid)','EXECUTE')"),false);
+});
+
+test("server-only tables have explicit deny policies for browser roles",async()=>{
+  for (const table of ['action_items','delivery_logs','kaarya_entitlements','kaarya_request_limits','kaarya_transcript_jobs','kaarya_transcript_sections','kaarya_transcript_uploads','kaarya_usage_requests','meetings','participants','prep_questions','user_profiles']) {
+    assert.equal(await scalar("select count(*)::int from pg_policies where schemaname='public' and tablename=$1 and policyname='kaarya_server_only'",[table]),1);
+  }
 });
 
 test("saving a review without a source payload preserves long original notes",async()=>{
