@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { uploadParts, transcriptSections, refinementSections, mergeSectionReports } from "../lib/longTranscript.js";
 import { withActionIds } from "../lib/meetingReview.js";
-import { assessNotes, MAX_TRANSCRIPT_BYTES, transcriptBytes } from "../lib/meetingInput.js";
+import { assessNotes, DIRECT_TRANSCRIPT_LENGTH, MAX_TRANSCRIPT_BYTES, transcriptBytes } from "../lib/meetingInput.js";
 import { exampleInput, exampleOutput } from "../lib/exampleMeeting.js";
 import { validateStructuredOutput, groundOutput } from "../lib/validate.js";
 import { buildPostMeetingEmail } from "../lib/templates.js";
@@ -20,7 +20,7 @@ test("sparse word boundaries still fit within the 350-section job capacity", () 
   const sections = transcriptSections(text);
   assert.ok(sections.length <= 350);
   assert.equal(sections.at(-1).end, text.length);
-  assert.ok(sections.every((section) => section.text.length <= 40000));
+  assert.ok(sections.every((section) => section.text.length <= DIRECT_TRANSCRIPT_LENGTH));
 });
 
 test("refinement context keeps every previous row exactly once, including manual actions", () => {
@@ -76,7 +76,7 @@ test("section coverage is continuous, bounded and includes the final commitment"
   let last = 0; let restored = "";
   for (const section of sections) {
     assert.ok(section.start <= last);
-    assert.ok(section.text.length <= 40000);
+    assert.ok(section.text.length <= DIRECT_TRANSCRIPT_LENGTH);
     assert.equal(section.text, text.slice(section.start, section.end));
     restored += section.text.slice(last - section.start); last = section.end;
   }
