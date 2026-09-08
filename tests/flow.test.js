@@ -90,7 +90,7 @@ for (const [name, quote] of [
 
 test("happy path uses a single provider call and a schema", async () => {
   let count = 0;
-  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseSchema.type, "OBJECT"); assert.equal(body.generationConfig.responseJsonSchema, undefined); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] }); };
+  globalThis.fetch = async (url, options) => { count++; assert.match(url, /generativelanguage/); assert.equal(options.headers["x-goog-api-key"], "test-gemini"); const body = JSON.parse(options.body); assert.equal(body.generationConfig.responseSchema.type, "OBJECT"); assert.equal(body.generationConfig.responseJsonSchema, undefined); assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 0); return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] }); };
   const events = []; const data = await extractAccountability({ payload: exampleInput, onStage: (stage) => events.push(stage) });
   assert.equal(count, 1); assert.equal(data.structured.action_items.length, 3); assert.deepEqual(events, ["extracting", "checking"]);
 });
@@ -222,18 +222,29 @@ test("explicit AI configuration takes precedence and normalizes provider/model",
   assert.equal(settings.llmModel, "gemini-2.5-flash");
   assert.equal(settings.llmApiKey, "configured");
 });
-test("OpenAI is preferred when both provider keys exist and gets one bounded fallback", () => {
+test("Gemini is preferred when both provider keys exist and gets one bounded Gemini fallback", () => {
   const settings = llmSettings({ OPENAI_API_KEY: "openai", GEMINI_API_KEY: "gemini" });
-  assert.equal(settings.llmProvider, "openai");
-  assert.equal(settings.llmModel, "gpt-5.4-mini");
-  assert.equal(settings.llmFallbackProvider, "openai");
-  assert.equal(settings.llmFallbackModel, "gpt-4.1-mini");
+  assert.equal(settings.llmProvider, "gemini");
+  assert.equal(settings.llmModel, "gemini-3.8-flash");
+  assert.equal(settings.llmFallbackProvider, "gemini");
+  assert.equal(settings.llmFallbackModel, "gemini-3.5-flash-lite");
   const plan = aiAttemptPlan(settings);
   assert.deepEqual(plan.map(({ role, provider, model, timeoutMs }) => ({ role, provider, model, timeoutMs })), [
-    { role: "primary", provider: "openai", model: "gpt-5.4-mini", timeoutMs: 36000 },
-    { role: "fallback", provider: "openai", model: "gpt-4.1-mini", timeoutMs: 16000 }
+    { role: "primary", provider: "gemini", model: "gemini-3.8-flash", timeoutMs: 35000 },
+    { role: "fallback", provider: "gemini", model: "gemini-3.5-flash-lite", timeoutMs: 17000 }
   ]);
   assert.ok(plan.reduce((sum, attempt) => sum + attempt.timeoutMs, 0) < 60000);
+});
+test("Gemini 3 uses supported low-latency thinking settings without deprecated sampling", async () => {
+  Object.assign(config, { llmProvider: "gemini", llmApiKey: "primary-key", llmModel: "gemini-3.8-flash", llmFallbackProvider: "", llmFallbackApiKey: "", llmFallbackModel: "", openaiApiKey: "" });
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    assert.match(url, /gemini-3.8-flash:generateContent$/);
+    assert.equal(body.generationConfig.temperature, undefined);
+    assert.deepEqual(body.generationConfig.thinkingConfig, { thinkingLevel: "low" });
+    return json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(generatedExample()) }] } }] });
+  };
+  assert.equal((await extractAccountability({ payload: exampleInput })).processing.model, "gemini-3.8-flash");
 });
 test("Gemini receives supported schema while local string limits stay intact", () => {
   const schema = { type: "object", properties: { task: { type: "string", minLength: 1, maxLength: 260 } }, required: ["task"], additionalProperties: false };
